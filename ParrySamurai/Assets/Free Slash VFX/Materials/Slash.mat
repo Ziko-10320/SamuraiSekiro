@@ -75,7 +75,7 @@ Material:
     - _Float: 0
     - _MaskNoise: 30
     - _MaskRotation: 0
-    - _Opacity: 1.7
+    - _Opacity: 1.83
     - _QueueControl: 0
     - _QueueOffset: 0
     - _Soft_Particle: 370.07
@@ -85,7 +85,7 @@ Material:
     - _ZWrite: 0
     - _ZWriteControl: 0
     m_Colors:
-    - _Color: {r: 128, g: 128, b: 128, a: 1}
+    - _Color: {r: 41.731815, g: 41.731815, b: 41.731815, a: 1}
     - _DissolveScroll: {r: 0.28, g: -0.24, b: 0, a: 0}
     - _MainColor: {r: 1, g: 1, b: 1, a: 1}
     - _MaskSpeed: {r: 1, g: 0, b: 0, a: 0}

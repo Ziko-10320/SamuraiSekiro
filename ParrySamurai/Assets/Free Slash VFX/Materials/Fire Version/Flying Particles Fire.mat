@@ -167,7 +167,7 @@ Material:
     - _ZWrite: 0
     - _ZWriteControl: 0
     m_Colors:
-    - _BackColor: {r: 3.852037, g: 4, b: 0, a: 1}
+    - _BackColor: {r: 0, g: 0, b: 0, a: 1}
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _Center: {r: 0, g: 0, b: 0, a: 0}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
@@ -177,7 +177,7 @@ Material:
     - _DissolveScroll: {r: 1, g: 0, b: 0, a: 0}
     - _DistortionSpeed: {r: 0.1, g: 0.1, b: 0, a: 0}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
-    - _FrontColor: {r: 7.773588, g: 4.146467, b: 0.93608636, a: 1}
+    - _FrontColor: {r: 3.1722498, g: 0.2774206, b: 0, a: 1}
     - _MaskCenter: {r: 0, g: 0, b: 0, a: 0}
     - _NoiseSpeed: {r: 0, g: 0, b: 0, a: 0}
     - _Offset: {r: -47.94, g: 19.62, b: 0, a: 0}
