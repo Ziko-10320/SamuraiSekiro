@@ -43,6 +43,11 @@ public class EnemyFollow : MonoBehaviour
     private float lungeTimer = 0f;
     private Vector2 lungeDirection;
     private EnemyHealth healthScript;
+    [Header("Defensive Dash")]
+    [SerializeField] private float dashSpeed = 10f;
+    [SerializeField] private float dashDuration = 0.4f;
+    private bool isDashing = false;
+
     void Awake()
     {
         animator = GetComponent<Animator>();
@@ -66,11 +71,8 @@ public class EnemyFollow : MonoBehaviour
 
     void Update()
     {
-        if (healthScript != null && healthScript.IsStunned())
+        if (isDashing || (healthScript != null && healthScript.IsStunned()))
         {
-            // If we are stunned, do not process any movement logic.
-            // You might also want to stop the NavMeshAgent if you are using one.
-            // agent.isStopped = true;
             return;
         }
         if (isLunging)
@@ -153,7 +155,32 @@ public class EnemyFollow : MonoBehaviour
         transform.rotation = Quaternion.Euler(isFacingRight ? rightFacingRotation : leftFacingRotation);
         transform.localScale = new Vector3(Mathf.Abs(transform.localScale.x), isFacingRight ? 2 : yFlipScale, transform.localScale.z);
     }
+    public void TriggerDefensiveDash()
+    {
+        if (!isDashing)
+        {
+            StartCoroutine(DefensiveDashCoroutine());
+        }
+    }
 
+    private IEnumerator DefensiveDashCoroutine()
+    {
+        isDashing = true;
+
+        // Calculate the direction AWAY from the player.
+        Vector2 directionToPlayer = (playerTarget.position - transform.position).normalized;
+        Vector2 dashDirection = -directionToPlayer;
+
+        float timer = 0f;
+        while (timer < dashDuration)
+        {
+            rb.MovePosition(rb.position + dashDirection * dashSpeed * Time.deltaTime);
+            timer += Time.deltaTime;
+            yield return null;
+        }
+
+        isDashing = false;
+    }
     private Vector2 GetTargetPosition()
     {
         if (stoppingPoint != null)
@@ -192,6 +219,10 @@ public class EnemyFollow : MonoBehaviour
 
         // Determine lunge direction based on where the enemy is facing.
         lungeDirection = isFacingRight ? Vector2.right : Vector2.left;
+    }
+    public bool IsFacingRight()
+    {
+        return isFacingRight;
     }
     private IEnumerator DecelerateCoroutine()
     {

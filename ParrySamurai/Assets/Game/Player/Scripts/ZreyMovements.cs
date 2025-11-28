@@ -479,6 +479,20 @@ public class ZreyMovements : MonoBehaviour
     {
         return isGrounded;
     }
+    public void FlipTowards(Transform target)
+    {
+        float directionToTarget = target.position.x - transform.position.x;
+        if (directionToTarget > 0 && !isFacingRight)
+        {
+            isFacingRight = true;
+        }
+        else if (directionToTarget < 0 && isFacingRight)
+        {
+            isFacingRight = false;
+        }
+        // Apply the rotation immediately.
+        transform.rotation = Quaternion.Euler(isFacingRight ? rightFacingRotation : leftFacingRotation);
+    }
     private void OnDrawGizmosSelected()
     {
         if (groundCheckPoint == null) return;

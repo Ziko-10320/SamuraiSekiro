@@ -46,7 +46,8 @@ public class EnemyAttack : MonoBehaviour
     private bool isDamageFrameActive = false;
     private bool hasDealtDamageThisAttack = false;
     private EnemyHealth healthScript;
-
+  
+    private bool isPerformingRangedAttack = false;
     void Awake()
     {
         animator = GetComponent<Animator>();
@@ -76,12 +77,12 @@ public class EnemyAttack : MonoBehaviour
     void Update()
     {
 
-        if (playerTarget == null || !canAttack || (healthScript != null && (healthScript.IsStunned() || healthScript.IsParrying() || healthScript.IsAttacking())))
+        if (isPerformingRangedAttack)
         {
-            if (healthScript != null && healthScript.IsParrying())
-            {
-                Debug.Log("<color=orange>--- ENEMY ATTACK: ABORTING ATTACK because health script says IsParrying() is TRUE. ---</color>", this.gameObject);
-            }
+            return;
+        }
+        if (playerTarget == null || !canAttack || isPerformingRangedAttack || (healthScript != null && (healthScript.IsStunned() || healthScript.IsParrying() || healthScript.IsAttacking())))
+        {
             return;
         }
 
@@ -96,15 +97,21 @@ public class EnemyAttack : MonoBehaviour
     }
     void FixedUpdate()
     {
-        // We check for damage in FixedUpdate for reliable physics detection.
-        if (isDamageFrameActive)
+        if (isDamageFrameActive && !isPerformingRangedAttack)
         {
             CheckForPlayerDamage();
         }
     }
-
+    public void SetRangedAttackState(bool isRanged)
+    {
+        isPerformingRangedAttack = isRanged;
+    }
     private void CheckForPlayerDamage()
     {
+        if (isPerformingRangedAttack)
+        {
+            return;
+        }
         if (hasDealtDamageThisAttack) return;
 
         Collider2D playerHit = Physics2D.OverlapBox(damagePoint.position, damageAreaSize, 0f, playerLayer);
@@ -202,7 +209,17 @@ public class EnemyAttack : MonoBehaviour
             Debug.LogWarning("Slash Effect is not assigned in the EnemyAttack script!", this);
         }
     }
+   
 
+    // --- We also need to expose the player target and attack status for the AI ---
+    public Transform GetPlayerTarget() 
+    {
+        return playerTarget;
+    }
+    public bool CanAttack() 
+    { 
+        return canAttack;
+    }
     // --- GIZMO FOR VISUALIZATION ---
     private void OnDrawGizmosSelected()
     {

@@ -1,5 +1,6 @@
 // CameraFollow.cs
 
+using System.Collections;
 using UnityEngine;
 
 public class CameraFollow : MonoBehaviour
@@ -55,5 +56,36 @@ public class CameraFollow : MonoBehaviour
     public void SetTarget(Transform newTarget)
     {
         target = newTarget;
+    }
+    public void TriggerZoom(float targetZoom, float duration)
+    {
+        StartCoroutine(ZoomCoroutine(targetZoom, duration));
+    }
+
+    private IEnumerator ZoomCoroutine(float targetZoom, float duration)
+    {
+        // Get the main camera component.
+        Camera cam = Camera.main;
+        if (cam == null)
+        {
+            Debug.LogError("CameraFollow: Camera.main is not found! Cannot perform zoom.");
+            yield break; // Stop the coroutine if there's no camera.
+        }
+
+        float startZoom = cam.orthographicSize;
+        float timer = 0f;
+
+        while (timer < duration)
+        {
+            // Use a smooth Lerp to change the camera's Orthographic Size over time.
+            float currentZoom = Mathf.Lerp(startZoom, targetZoom, timer / duration);
+            cam.orthographicSize = currentZoom;
+
+            timer += Time.deltaTime;
+            yield return null;
+        }
+
+        // Ensure the final zoom level is exact.
+        cam.orthographicSize = targetZoom;
     }
 }

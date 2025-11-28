@@ -28,7 +28,7 @@ public class EnemyHealth : MonoBehaviour
     // --- Animation Hashes ---
     private readonly int getParriedTriggerHash = Animator.StringToHash("getParried");
     private readonly int takeDamageTriggerHash = Animator.StringToHash("takeDamage");
-    private readonly int deathTriggerHash = Animator.StringToHash("death");
+  
     private bool isParrying = false;
     public ShakeData CameraShakeParry;
 
@@ -49,6 +49,23 @@ public class EnemyHealth : MonoBehaviour
     [SerializeField] private float knockbackDistance = 0.5f;
     [Tooltip("How quickly the knockback happens (in seconds).")]
     [SerializeField] private float knockbackDuration = 0.1f;
+
+    [Tooltip("The UI object that appears over the enemy when they can be finished.")]
+    [SerializeField] private GameObject finisherPromptUI;
+    private bool isFinishable = false;
+
+    private readonly int enterFinishableStateTriggerHash = Animator.StringToHash("enterFinishableState");
+
+    [Header("Finisher Blood Effects")]
+    [Tooltip("The particle system prefab for the head blood effect.")]
+    [SerializeField] private ParticleSystem bloodHeadEffectPrefab; 
+    [Tooltip("The transform where the head blood should spawn.")]
+    [SerializeField] private Transform bloodHeadSpawnPoint;
+
+    [Tooltip("The particle system prefab for the body blood effect.")]
+    [SerializeField] private ParticleSystem bloodBodyEffectPrefab; 
+    [Tooltip("The transform where the body blood should spawn.")]
+    [SerializeField] private Transform bloodBodySpawnPoint; 
     void Awake()
     {
         currentHealth = maxHealth;
@@ -56,6 +73,10 @@ public class EnemyHealth : MonoBehaviour
         followScript = GetComponent<EnemyFollow>(); // Get the follow script
         rb = GetComponent<Rigidbody2D>();
          enemyAI = GetComponent<EnemyAI>();
+        if (finisherPromptUI != null)
+        {
+            finisherPromptUI.SetActive(false);
+        }
     }
 
    
@@ -240,16 +261,82 @@ public class EnemyHealth : MonoBehaviour
         // --- ADD THIS LOG ---
         Debug.Log("<color=grey>--- ENEMY HEALTH: Parry Window CLOSED (isParrying = false). Animation event SUCCESS. ---</color>", this.gameObject);
     }
-   
     private void Die()
     {
-        Debug.Log("Enemy has died!");
-        animator.SetTrigger(deathTriggerHash);
+        // This check is still good. It prevents the method from running multiple times.
+        if (isFinishable)
+        {
+            return;
+        }
 
-        // Disable all enemy components to stop it from acting.
-        GetComponent<EnemyFollow>().enabled = false;
-        GetComponent<EnemyAttack>().enabled = false;
-        gameObject.SetActive(false); // So it can't be hit anymore
-        this.enabled = false;
+        Debug.Log("<color=orange>Enemy health at 0. Entering FINISHABLE state.</color>");
+        isFinishable = true; // The C# bool is still needed for the logic, but not for the Animator.
+
+        // --- THIS IS THE GUARANTEED FIX ---
+        // We are now using a Trigger. It fires once and cannot get stuck in a loop.
+        animator.SetTrigger(enterFinishableStateTriggerHash);
+        // --- END OF FIX ---
+
+        // The rest of the lockdown code is correct.
+        if (GetComponent<EnemyAI>() != null) GetComponent<EnemyAI>().enabled = false;
+        if (GetComponent<EnemyFollow>() != null) GetComponent<EnemyFollow>().enabled = false;
+        if (GetComponent<EnemyAttack>() != null) GetComponent<EnemyAttack>().enabled = false;
+
+        animator.applyRootMotion = false;
+        rb.isKinematic = true;
+        rb.velocity = Vector2.zero;
+
+        gameObject.layer = LayerMask.NameToLayer("Finishable");
+
+        if (finisherPromptUI != null)
+        {
+            finisherPromptUI.SetActive(true);
+        }
+    }
+    public void CameraShake()
+    {
+        CameraShakerHandler.Shake(CameraShakeParry);
+    }
+    public void TriggerBloodHeadEffect()
+    {
+        if (bloodHeadEffectPrefab != null && bloodHeadSpawnPoint != null)
+        {
+            // Instantiate the prefab at the correct position and rotation, then play it.
+            Instantiate(bloodHeadEffectPrefab, bloodHeadSpawnPoint.position, bloodHeadSpawnPoint.rotation);
+        }
+        else
+        {
+            Debug.LogWarning("Tried to trigger BloodHeadEffect, but prefab or spawn point is missing!", this);
+        }
+    }
+
+    /// <summary>
+    /// This public method is called by an Animation Event during the ReceiveFinisher animation.
+    /// </summary>
+    public void TriggerBloodBodyEffect()
+    {
+        if (bloodBodyEffectPrefab != null && bloodBodySpawnPoint != null)
+        {
+            // Instantiate the prefab at the correct position and rotation, then play it.
+            Instantiate(bloodBodyEffectPrefab, bloodBodySpawnPoint.position, bloodBodySpawnPoint.rotation);
+        }
+        else
+        {
+            Debug.LogWarning("Tried to trigger BloodBodyEffect, but prefab or spawn point is missing!", this);
+        }
+    }
+    public bool IsFinishable()
+    {
+        return isFinishable;
+    }
+
+    /// <summary>
+    /// This is called by the player to officially kill the enemy after the finisher animation.
+    /// </summary>
+    public void ExecuteDeath()
+    {
+        Debug.Log("<color=red>Enemy has been executed. Destroying GameObject.</color>");
+        // You can add loot drops or XP gain here before destroying.
+        Destroy(gameObject,3);
     }
 }

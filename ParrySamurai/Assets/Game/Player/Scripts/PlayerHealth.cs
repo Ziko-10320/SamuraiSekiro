@@ -140,7 +140,7 @@ public class PlayerHealth : MonoBehaviour
     /// <summary>
     /// This is the public method that enemies will call to deal damage.
     /// </summary>
-    public void TakeDamage(int damageAmount, EnemyHealth attackingEnemy = null) // Added optional enemy parameter
+    public void TakeDamage(int damageAmount, EnemyHealth attackingEnemy = null, SlashProjectile sourceProjectile = null) // Added optional enemy parameter
     {
         // --- PARRY LOGIC ---
         // If the player is in the parry window...
@@ -148,6 +148,11 @@ public class PlayerHealth : MonoBehaviour
         {
             CameraShakerHandler.Shake(CameraShakeParry);
             Debug.Log("PARRY SUCCESSFUL!");
+            if (sourceProjectile != null)
+            {
+                // If yes, tell the projectile that it has been parried.
+                sourceProjectile.OnParried();
+            }
             if (attackingEnemy != null)
             {
                 // If we do, COMMAND them to get stunned.

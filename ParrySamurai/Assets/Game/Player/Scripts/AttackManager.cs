@@ -2,6 +2,7 @@
 
 using UnityEngine;
 using System.Collections;
+using Cinemachine;
 
 public class AttackManager : MonoBehaviour
 {
@@ -56,7 +57,28 @@ public class AttackManager : MonoBehaviour
     // --- State Control ---
     private bool isDamageFrameActive = false;
     private bool hasDealtDamageThisAttack = false;
-    
+
+    [Header("Finisher Settings")]
+    [Tooltip("The point from which we scan for finishable enemies.")]
+    [SerializeField] private Transform finisherCheckPoint; 
+    [Tooltip("The radius of the scan for finishable enemies.")]
+    [SerializeField] private float finisherCheckRadius = 1.5f; 
+    [Tooltip("The layer the enemies are on.")]
+    [SerializeField] private LayerMask finisherEnemyLayer; // This should be your normal 'enemyLayer'"
+
+private bool isPerformingFinisher = false;
+    private EnemyHealth currentFinisherTarget;
+    // --- ADD THESE NEW ANIMATION HASHES ---
+    private readonly int performFinisherTriggerHash = Animator.StringToHash("PerformFinisher");
+    [Header("Finisher Camera Settings")]
+    [Tooltip("The Cinemachine Virtual Camera that follows the player.")]
+    [SerializeField] private CameraFollow cameraFollowScript; 
+    [Tooltip("The target zoom level (Orthographic Size) for the camera during the finisher.")]
+    [SerializeField] private float finisherZoomLevel = 4f; 
+    [Tooltip("How fast the camera zooms in and out (in seconds).")]
+    [SerializeField] private float zoomDuration = 0.5f; 
+    private float originalZoomLevel;
+
     void Awake()
     {
         if (animator == null) animator = GetComponent<Animator>();
@@ -66,6 +88,10 @@ public class AttackManager : MonoBehaviour
 
     void Update()
     {
+        if (isPerformingFinisher)
+        {
+            return;
+        }
         if (isAttackDisabled)
         {
             return;
@@ -74,14 +100,109 @@ public class AttackManager : MonoBehaviour
         // --- THIS IS THE FINAL, GUARANTEED FIX ---
         // We add ONE condition: !playerHealth.isBlocking
         // This prevents an attack from being queued while the player is holding the block button.
-        if (Input.GetMouseButtonDown(0) && playerMovement.IsGrounded() && !playerMovement.IsDashing() && (playerHealth == null || !playerHealth.isBlocking))
+        if (Input.GetMouseButtonDown(0) && playerMovement.IsGrounded() && !playerMovement.IsDashing())
         {
-            attackQueued = true;
+            // --- THIS IS THE NEW FINISHER LOGIC ---
+            // 1. Try to perform a finisher first.
+            bool finisherFound = TryPerformFinisher();
+
+            // 2. If a finisher was NOT found, then queue a normal attack.
+            if (!finisherFound && (playerHealth == null || !playerHealth.isBlocking))
+            {
+                attackQueued = true;
+            }
+            // --- END OF NEW LOGIC ---
         }
         // --- END OF FINAL, GUARANTEED FIX ---
 
         HandleAttacks();
     }
+    private bool TryPerformFinisher()
+    {
+        // Scan a circle in front of the player for any colliders on the enemy layer.
+        Collider2D enemyToFinish = Physics2D.OverlapCircle(finisherCheckPoint.position, finisherCheckRadius, finisherEnemyLayer);
+
+        // If we didn't find an enemy, we can't perform a finisher.
+        if (enemyToFinish == null)
+        {
+            return false;
+        }
+
+        // We found an enemy. Now, ask it if it's finishable.
+        EnemyHealth enemyHealth = enemyToFinish.GetComponent<EnemyHealth>();
+        if (enemyHealth != null && enemyHealth.IsFinishable())
+        {
+            // SUCCESS! Start the finisher sequence.
+            StartCoroutine(FinisherSequence(enemyHealth));
+            return true; // Return true to prevent a normal attack.
+        }
+
+        // We found an enemy, but it wasn't finishable.
+        return false;
+    }
+
+    private IEnumerator FinisherSequence(EnemyHealth targetEnemy)
+    {
+        Debug.Log("--- FINISHER SEQUENCE STARTED ---");
+        isPerformingFinisher = true; // Lock the player's AttackManager.
+        currentFinisherTarget = targetEnemy;
+        // 1. The Lockdown
+        playerMovement.SetAttacking(true); // Re-use this to lock player movement.
+        if (cameraFollowScript != null && Camera.main != null)
+        {
+            // 1. Store the camera's current zoom level.
+            originalZoomLevel = Camera.main.orthographicSize;
+            // 2. Command the CameraFollow script to zoom in.
+            cameraFollowScript.TriggerZoom(finisherZoomLevel, zoomDuration);
+        }
+        // 2. The "Warp"
+        // This instantly moves the player to the perfect position relative to the enemy.
+        // You MUST adjust these values to fit your animations.
+        Vector3 finisherPosition = targetEnemy.transform.position + (targetEnemy.transform.right * -1.2f); // Example: 1.2 units in front of the enemy
+        transform.position = finisherPosition;
+        // Force the player to look at the enemy.
+        playerMovement.FlipTowards(targetEnemy.transform);
+
+        // 3. The "Action!" Call
+        // Tell the player's animator to play the finisher.
+        animator.SetTrigger(performFinisherTriggerHash);
+        // Tell the enemy's animator to play its reaction.
+        targetEnemy.GetComponent<Animator>().SetTrigger("ReceiveFinisher"); // We will create this trigger.
+
+        // The animation event will handle the rest.
+        yield return null; // The coroutine just starts the process.
+    }
+
+    // This method will be called by an Animation Event at the end of the finisher animation.
+    public void FinishFinisher(EnemyHealth targetEnemy)
+    {
+        if (currentFinisherTarget == null)
+        {
+            Debug.LogError("FinishFinisher was called, but there is no currentFinisherTarget!", this);
+            // We still need to unlock the player even if something went wrong.
+            isPerformingFinisher = false;
+            playerMovement.SetAttacking(false);
+            return;
+        }
+        // --- END OF FIX ---
+        if (cameraFollowScript != null)
+        {
+            // Command the CameraFollow script to zoom back out to the original level.
+            cameraFollowScript.TriggerZoom(originalZoomLevel, zoomDuration);
+        }
+        Debug.Log("--- FINISHER SEQUENCE FINISHED ---");
+
+        // 2. Execute the death of the stored target.
+        currentFinisherTarget.ExecuteDeath();
+
+        // 3. Clear the stored target so we don't accidentally kill it again.
+        currentFinisherTarget = null;
+
+        // 4. Release the locks on the player.
+        isPerformingFinisher = false;
+        playerMovement.SetAttacking(false);
+    }
+  
     public void CancelAttack()
     {
         // This method is called when the player gets hit.
