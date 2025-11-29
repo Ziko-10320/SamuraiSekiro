@@ -146,6 +146,7 @@ private bool isPerformingFinisher = false;
         Debug.Log("--- FINISHER SEQUENCE STARTED ---");
         isPerformingFinisher = true; // Lock the player's AttackManager.
         currentFinisherTarget = targetEnemy;
+        targetEnemy.MarkAsFinished();
         // 1. The Lockdown
         playerMovement.SetAttacking(true); // Re-use this to lock player movement.
         if (cameraFollowScript != null && Camera.main != null)
@@ -409,7 +410,10 @@ private bool isPerformingFinisher = false;
             }
         }
     }
-
+    public bool IsPerformingFinisher()
+    {
+        return isPerformingFinisher;
+    }
     public bool IsAttacking()
     {
         return isAttacking;

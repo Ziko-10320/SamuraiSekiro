@@ -65,7 +65,18 @@ public class EnemyHealth : MonoBehaviour
     [Tooltip("The particle system prefab for the body blood effect.")]
     [SerializeField] private ParticleSystem bloodBodyEffectPrefab; 
     [Tooltip("The transform where the body blood should spawn.")]
-    [SerializeField] private Transform bloodBodySpawnPoint; 
+    [SerializeField] private Transform bloodBodySpawnPoint;
+
+    [Header("Finisher Blood Effects (Flipped)")]
+    [Tooltip("The FLIPPED particle system prefab for the head blood effect.")]
+    [SerializeField] private ParticleSystem bloodHeadEffectPrefab_Flipped; 
+    [Tooltip("The FLIPPED transform where the head blood should spawn.")]
+    [SerializeField] private Transform bloodHeadSpawnPoint_Flipped; 
+
+    [Tooltip("The FLIPPED particle system prefab for the body blood effect.")]
+    [SerializeField] private ParticleSystem bloodBodyEffectPrefab_Flipped; 
+    [Tooltip("The FLIPPED transform where the body blood should spawn.")]
+    [SerializeField] private Transform bloodBodySpawnPoint_Flipped; 
     void Awake()
     {
         currentHealth = maxHealth;
@@ -299,35 +310,67 @@ public class EnemyHealth : MonoBehaviour
     }
     public void TriggerBloodHeadEffect()
     {
-        if (bloodHeadEffectPrefab != null && bloodHeadSpawnPoint != null)
+        // We need to ask the Follow script which way the enemy is facing.
+        if (followScript == null) return;
+
+        // Check if the enemy is facing right.
+        if (followScript.IsFacingRight())
         {
-            // Instantiate the prefab at the correct position and rotation, then play it.
-            Instantiate(bloodHeadEffectPrefab, bloodHeadSpawnPoint.position, bloodHeadSpawnPoint.rotation);
+            // Use the normal, right-facing effects.
+            if (bloodHeadEffectPrefab != null && bloodHeadSpawnPoint != null)
+            {
+                Instantiate(bloodHeadEffectPrefab, bloodHeadSpawnPoint.position, bloodHeadSpawnPoint.rotation);
+            }
         }
-        else
+        else // The enemy is facing left.
         {
-            Debug.LogWarning("Tried to trigger BloodHeadEffect, but prefab or spawn point is missing!", this);
+            // Use the new, flipped effects.
+            if (bloodHeadEffectPrefab_Flipped != null && bloodHeadSpawnPoint_Flipped != null)
+            {
+                Instantiate(bloodHeadEffectPrefab_Flipped, bloodHeadSpawnPoint_Flipped.position, bloodHeadSpawnPoint_Flipped.rotation);
+            }
         }
     }
+
 
     /// <summary>
     /// This public method is called by an Animation Event during the ReceiveFinisher animation.
     /// </summary>
     public void TriggerBloodBodyEffect()
     {
-        if (bloodBodyEffectPrefab != null && bloodBodySpawnPoint != null)
+        if (followScript == null) return;
+
+        if (followScript.IsFacingRight())
         {
-            // Instantiate the prefab at the correct position and rotation, then play it.
-            Instantiate(bloodBodyEffectPrefab, bloodBodySpawnPoint.position, bloodBodySpawnPoint.rotation);
+            // Use the normal, right-facing effects.
+            if (bloodBodyEffectPrefab != null && bloodBodySpawnPoint != null)
+            {
+                Instantiate(bloodBodyEffectPrefab, bloodBodySpawnPoint.position, bloodBodySpawnPoint.rotation);
+            }
         }
-        else
+        else // The enemy is facing left.
         {
-            Debug.LogWarning("Tried to trigger BloodBodyEffect, but prefab or spawn point is missing!", this);
+            // Use the new, flipped effects.
+            if (bloodBodyEffectPrefab_Flipped != null && bloodBodySpawnPoint_Flipped != null)
+            {
+                Instantiate(bloodBodyEffectPrefab_Flipped, bloodBodySpawnPoint_Flipped.position, bloodBodySpawnPoint_Flipped.rotation);
+            }
         }
     }
     public bool IsFinishable()
     {
         return isFinishable;
+    }
+    public void MarkAsFinished()
+    {
+        // This flips the switch, making it impossible to finish this enemy again.
+        isFinishable = false;
+
+        // It's also a good idea to hide the UI prompt immediately.
+        if (finisherPromptUI != null)
+        {
+            finisherPromptUI.SetActive(false);
+        }
     }
 
     /// <summary>

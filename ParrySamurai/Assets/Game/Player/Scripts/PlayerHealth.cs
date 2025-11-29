@@ -83,6 +83,11 @@ public class PlayerHealth : MonoBehaviour
 
     void Update()
     {
+        if (attackManager != null && attackManager.IsPerformingFinisher())
+        {
+            // If yes, ignore all input in this script.
+            return;
+        }
         if (Input.GetMouseButtonDown(1))
         {
             // ...and they are not already blocking...
@@ -142,6 +147,11 @@ public class PlayerHealth : MonoBehaviour
     /// </summary>
     public void TakeDamage(int damageAmount, EnemyHealth attackingEnemy = null, SlashProjectile sourceProjectile = null) // Added optional enemy parameter
     {
+        if (attackManager != null && attackManager.IsPerformingFinisher())
+        {
+            // If yes, do nothing. The player is invincible.
+            return;
+        }
         // --- PARRY LOGIC ---
         // If the player is in the parry window...
         if (isParryWindowActive)
