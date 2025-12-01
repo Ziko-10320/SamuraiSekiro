@@ -3,6 +3,7 @@
 using UnityEngine;
 using System.Collections;
 using Cinemachine;
+using UnityEngine.UI;
 
 public class AttackManager : MonoBehaviour
 {
@@ -74,20 +75,51 @@ private bool isPerformingFinisher = false;
     [Tooltip("The Cinemachine Virtual Camera that follows the player.")]
     [SerializeField] private CameraFollow cameraFollowScript; 
     [Tooltip("The target zoom level (Orthographic Size) for the camera during the finisher.")]
-    [SerializeField] private float finisherZoomLevel = 4f; 
+    [SerializeField] private float finisherZoomLevel = 4f;
+    [SerializeField] private float clashZoomLevel = 3.5f;
     [Tooltip("How fast the camera zooms in and out (in seconds).")]
     [SerializeField] private float zoomDuration = 0.5f; 
     private float originalZoomLevel;
 
+    [Header("Clash QTE Settings")]
+    [Tooltip("The parent GameObject for the QTE UI.")]
+    [SerializeField] private GameObject qteUIParent; 
+    [Tooltip("The UI Image element that will display the key sprite.")]
+    [SerializeField] private UnityEngine.UI.Image qteKeyImage; 
+    [Tooltip("The list of possible keys that can appear in the QTE.")]
+    [SerializeField] private QTEKey[] possibleQTEKeys; 
+
+    [Tooltip("How many prompts will appear in the sequence.")]
+    [SerializeField] private int qteSequenceLength = 4; 
+    [Tooltip("How many correct presses are needed to win.")]
+    [SerializeField] private int qteRequiredWins = 3; 
+    [Tooltip("How long the player has to press each key (in seconds).")]
+    [SerializeField] private float qteTimePerKey = 0.6f;
+    private bool isClashing = false;
+    private Coroutine clashCoroutine;
+    private int clashStateHash;
+    [SerializeField] private ParticleSystem clashEffect;
+    [SerializeField] private GameObject enemyWinEffectPrefab;
+    [Tooltip("The position where the enemy's victory effect should spawn.")]
+    [SerializeField] private Transform enemyWinEffectSpawnPoint;
     void Awake()
     {
         if (animator == null) animator = GetComponent<Animator>();
         if (playerMovement == null) playerMovement = GetComponent<ZreyMovements>();
         rb = GetComponent<Rigidbody2D>();
     }
-
+    void Start()
+    {
+        // ... (your other Start() code is perfect) ...
+        // Convert the string "Clash" into a number for faster access.
+        clashStateHash = Animator.StringToHash("Clash");
+    }
     void Update()
     {
+        if (isPerformingFinisher || isClashing)
+        {
+            return;
+        }
         if (isPerformingFinisher)
         {
             return;
@@ -116,6 +148,163 @@ private bool isPerformingFinisher = false;
         // --- END OF FINAL, GUARANTEED FIX ---
 
         HandleAttacks();
+    }
+    public void StartClash(EnemyAI enemy)
+    {
+        // Failsafe: Don't start a new clash if one is already happening.
+        if (isClashing) return;
+
+        // Stop any existing clash coroutine to be safe.
+        if (clashCoroutine != null)
+        {
+            StopCoroutine(clashCoroutine);
+        }
+        clashCoroutine = StartCoroutine(ClashSequence(enemy));
+    }
+
+    private IEnumerator ClashSequence(EnemyAI enemy)
+    {
+        Debug.Log("<color=yellow>--- CLASH SEQUENCE COROUTINE STARTED ---</color>");
+        isClashing = true;
+        if (clashEffect != null)
+        {
+            clashEffect.Play();
+        }
+        // --- Phase 2: The Lockdown ---
+        playerMovement.SetAttacking(true);
+        enemy.SetClashState(true);
+
+        // --- Camera and Effects (Your existing code is good) ---
+        if (cameraFollowScript != null && Camera.main != null)
+        {
+            originalZoomLevel = Camera.main.orthographicSize;
+            cameraFollowScript.TriggerZoom(clashZoomLevel, zoomDuration);
+        }
+       
+
+        // --- THE GUARANTEED ANIMATION FIX ---
+        // 1. Set the boolean flag.
+        animator.SetBool("isClashing", true);
+        enemy.GetComponent<Animator>().SetBool("isClashing", true);
+
+        // 2. Wait for the end of the current frame. This allows any rogue triggers
+        //    (like the parry one we just disabled) to finish their business.
+        yield return new WaitForEndOfFrame();
+
+        // 3. NOW, on a clean slate, we force the animation state. This is our override.
+        animator.Play(clashStateHash);
+        enemy.GetComponent<Animator>().Play("Clash");
+        Debug.Log("<color=yellow>Forcing Player and Enemy into 'Clash' animation state.</color>");
+        // --- END OF ANIMATION FIX ---
+
+        // Activate the UI Parent Canvas
+        if (qteUIParent != null) qteUIParent.SetActive(true);
+
+        // A small delay before the QTE starts, allowing animations to blend in.
+        yield return new WaitForSeconds(0.5f);
+
+        // --- Phase 3: The Mini-Game ---
+        int correctPresses = 0;
+        for (int i = 0; i < qteSequenceLength; i++)
+        {
+            if (possibleQTEKeys.Length == 0)
+            {
+                Debug.LogError("QTE FAILED: No possible QTE keys are assigned in the AttackManager!");
+                break;
+            }
+            QTEKey currentKey = possibleQTEKeys[Random.Range(0, possibleQTEKeys.Length)];
+
+            // --- THE GUARANTEED UI FIX ---
+            if (qteKeyImage != null)
+            {
+                // 1. Assign the sprite.
+                qteKeyImage.sprite = currentKey.keySprite;
+
+                // 2. BRUTE FORCE a fully visible color. This overrides any transparency.
+                qteKeyImage.color = new Color(1f, 1f, 1f, 1f); // White, 100% Opaque
+
+                // 3. Enable the image object.
+                qteKeyImage.gameObject.SetActive(true);
+                Debug.Log($"Showing QTE Key: {currentKey.keyName}");
+            }
+            // --- END OF UI FIX ---
+
+            float timer = 0f;
+            bool pressedCorrectly = false;
+            bool pressedWrong = false;
+
+            while (timer < qteTimePerKey)
+            {
+                if (Input.GetKeyDown(currentKey.keyCode))
+                {
+                    pressedCorrectly = true;
+                    break;
+                }
+                if (Input.anyKeyDown && !Input.GetKeyDown(currentKey.keyCode))
+                {
+                    pressedWrong = true;
+                    break;
+                }
+                timer += Time.deltaTime;
+                yield return null;
+            }
+
+            if (qteKeyImage != null) qteKeyImage.gameObject.SetActive(false);
+
+            if (pressedCorrectly) { correctPresses++; Debug.Log($"<color=green>QTE Correct! ({correctPresses}/{qteRequiredWins})</color>"); }
+            else if (pressedWrong) { Debug.Log("<color=red>QTE Wrong Key!</color>"); }
+            else { Debug.Log("<color=orange>QTE Timed Out!</color>"); }
+
+            yield return new WaitForSeconds(0.2f);
+        }
+
+        // --- Phase 4 & 5: Judgment and Release ---
+        FinishClash(enemy, correctPresses);
+    }
+
+    private void FinishClash(EnemyAI enemy, int correctPresses)
+    {
+        Debug.Log("<color=cyan>--- CLASH SEQUENCE FINISHED ---</color>");
+        EnemyAttack enemyAttack = enemy.GetComponent<EnemyAttack>();
+        if (enemyAttack != null)
+        {
+            Debug.Log("<color=yellow>Manually calling FinishCombo() for the enemy to clean up the interrupted combo.</color>");
+            enemyAttack.FinishCombo();
+        }
+        if (cameraFollowScript != null)
+        {
+            cameraFollowScript.TriggerZoom(originalZoomLevel, zoomDuration);
+        }
+        // --- Phase 4: Judgment ---
+        if (correctPresses >= qteRequiredWins)
+        {
+            Debug.Log("<color=green>PLAYER WINS THE CLASH!</color>");
+            // (We will add the reward logic here later)
+        }
+        else
+        {
+            Debug.Log("<color=red>ENEMY WINS THE CLASH!</color>");
+            if (enemyWinEffectPrefab != null && enemyWinEffectSpawnPoint != null)
+            {
+                Debug.Log("<color=red>Spawning Enemy Win Effect.</color>");
+                Instantiate(enemyWinEffectPrefab, enemyWinEffectSpawnPoint.position, enemyWinEffectSpawnPoint.rotation);
+            }
+            // (We will add the punishment logic here later)
+        }
+
+        // --- Phase 5: Release ---
+        // Deactivate the UI.
+        if (qteUIParent != null) qteUIParent.SetActive(false);
+
+        // Stop the looping animations.
+        animator.SetBool("isClashing", false);
+        enemy.GetComponent<Animator>().SetBool("isClashing", false);
+
+        // Unlock the player and enemy.
+        playerMovement.SetAttacking(false);
+        enemy.SetClashState(false);
+
+        isClashing = false;
     }
     private bool TryPerformFinisher()
     {

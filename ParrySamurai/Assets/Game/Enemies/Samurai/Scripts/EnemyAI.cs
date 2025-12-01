@@ -51,7 +51,7 @@ public class EnemyAI : MonoBehaviour
     [Header("Ranged Attack")]
     [SerializeField] private GameObject slashProjectilePrefab;
     [SerializeField] private Transform projectileSpawnPoint;
-
+    private bool isClashing = false;
     void Awake()
     {
         animator = GetComponent<Animator>();
@@ -63,6 +63,10 @@ public class EnemyAI : MonoBehaviour
 
     void Update()
     {
+        if (isLocked || isClashing || (healthScript != null && healthScript.IsStunned()))
+        {
+            return;
+        }
         if (attackScript != null && !attackScript.CanAttack())
         {
             return;
@@ -103,7 +107,10 @@ public class EnemyAI : MonoBehaviour
 
         // Decision 3: (Implicit) If neither of the above, the EnemyAttack script will handle melee.
     }
-
+    public void SetClashState(bool state)
+    {
+        isClashing = state;
+    }
 
     // --- MODIFY THE DefensiveDashSequence() COROUTINE TO RESET THE COOLDOWN ---
     private IEnumerator DefensiveDashSequence()

@@ -280,13 +280,30 @@ public class PlayerHealth : MonoBehaviour
         {
             // 2. If YES, the parry is successful!
             Debug.Log("<color=cyan>PLAYER PARRIED THE HEAVY ATTACK! No damage or knockback taken.</color>");
+            EnemyAI enemyAI = damageSource.GetComponent<EnemyAI>();
+            if (attackManager != null && enemyAI != null)
+            {
+                // 2. If it is, we initiate a CLASH, not a normal parry.
+                Debug.Log("<color=yellow>HEAVY PARRY SUCCESSFUL! INITIATING CLASH!</color>");
+                attackManager.StartClash(enemyAI);
 
+                // 3. IMPORTANT: We STOP here. We do not run any of the normal parry logic below.
+                //    This prevents the 'parry' and 'GetParried' triggers from firing and breaking the animation.
+                return;
+            }
             // We can still play the normal parry effects for feedback.
             CameraShakerHandler.Shake(CameraShakeParry);
             animator.SetTrigger(parryTriggerHash); // Play the player's parry animation
             if (parrySparksEffect != null && parrySparksSpawnPoint != null)
             {
                 Instantiate(parrySparksEffect, parrySparksSpawnPoint.position, parrySparksSpawnPoint.rotation);
+            }
+          
+
+            // 2. If we found it, tell the player's AttackManager to start the clash.
+            if (attackManager != null && enemyAI != null)
+            {
+                attackManager.StartClash(enemyAI);
             }
             StartCoroutine(SlowMoEffect());
 
