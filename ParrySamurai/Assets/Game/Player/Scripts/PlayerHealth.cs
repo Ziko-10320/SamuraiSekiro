@@ -63,6 +63,7 @@ public class PlayerHealth : MonoBehaviour
     [SerializeField] private float knockbackDuration = 0.15f;
     [SerializeField] private float guardBreakKnockbackDistance = 3f;
     [SerializeField] private float guardBreakKnockbackDuration = 0.3f;
+    private readonly int heavyTakeDamageTriggerHash = Animator.StringToHash("HeavyTakeDamage");
     void Awake()
     {
        
@@ -158,6 +159,21 @@ public class PlayerHealth : MonoBehaviour
         {
             CameraShakerHandler.Shake(CameraShakeParry);
             Debug.Log("PARRY SUCCESSFUL!");
+            if (attackingEnemy != null)
+            {
+                // 2. ASK the enemy if it is in its special combo.
+                if (attackingEnemy.IsInUninterruptibleCombo())
+                {
+                    // 3. If YES, do NOT stun it. Just log that we deflected the attack.
+                    Debug.Log("<color=orange>Parried an uninterruptible combo attack! Enemy was not stunned.</color>");
+                }
+                else
+                {
+                    // 4. If NO, then it was a normal attack. Stun the enemy as usual.
+                    Debug.Log($"<color=lime>Parried a normal attack! COMMANDING enemy ({attackingEnemy.name}) to get stunned!</color>");
+                    attackingEnemy.GetParried(this.transform);
+                }
+            }
             if (sourceProjectile != null)
             {
                 // If yes, tell the projectile that it has been parried.
@@ -246,7 +262,70 @@ public class PlayerHealth : MonoBehaviour
             Die();
         }
     }
+    private IEnumerator HeavyKnockbackCoroutine(Transform damageSource, float knockbackDist, float knockbackDur, float delay)
+    {
+        // 1. Wait for the specified delay. This creates the "impact" moment.
+        yield return new WaitForSeconds(delay);
 
+        // 2. After the delay, apply the knockback.
+        // This code is the same as before, it just runs later now.
+        if (playerMovement != null)
+        {
+            playerMovement.ApplyKnockback(damageSource, knockbackDist, knockbackDur);
+        }
+    }
+    public void TakeHeavyDamage(int damageAmount, Transform damageSource, float knockbackDist, float knockbackDur, int animationTriggerHash)
+    {
+        if (isParryWindowActive)
+        {
+            // 2. If YES, the parry is successful!
+            Debug.Log("<color=cyan>PLAYER PARRIED THE HEAVY ATTACK! No damage or knockback taken.</color>");
+
+            // We can still play the normal parry effects for feedback.
+            CameraShakerHandler.Shake(CameraShakeParry);
+            animator.SetTrigger(parryTriggerHash); // Play the player's parry animation
+            if (parrySparksEffect != null && parrySparksSpawnPoint != null)
+            {
+                Instantiate(parrySparksEffect, parrySparksSpawnPoint.position, parrySparksSpawnPoint.rotation);
+            }
+            StartCoroutine(SlowMoEffect());
+
+            // 3. IMPORTANT: Stop the method here. Do not apply any damage or knockback.
+            return;
+        }
+        // Cancel any current player attack.
+        if (attackManager != null)
+        {
+            attackManager.CancelAttack();
+        }
+
+        // Apply damage.
+        currentHealth -= damageAmount;
+        Debug.Log($"Player took {damageAmount} heavy damage. Current Health: {currentHealth}");
+
+        // Play the special heavy damage animation.
+        animator.SetTrigger(animationTriggerHash);
+        StartCoroutine(HeavyKnockbackCoroutine(damageSource, knockbackDist, knockbackDur, 0.17f));
+        // Apply the huge knockback.
+        if (playerMovement != null)
+        {
+            playerMovement.ApplyKnockback(damageSource, knockbackDist, knockbackDur);
+        }
+
+        // Play blood effect.
+        if (bloodEffect != null && bloodEffectSpawnPoint != null)
+        {
+            ParticleSystem newBloodEffect = Instantiate(bloodEffect, bloodEffectSpawnPoint.position, Quaternion.identity);
+            newBloodEffect.Play();
+        }
+
+        // Check for death.
+        if (currentHealth <= 0)
+        {
+            currentHealth = 0;
+            Die();
+        }
+    }
     // Add these NEW coroutines to PlayerHealth.cs:
 
     private IEnumerator ParryWindowCoroutine()

@@ -72,7 +72,7 @@ public class ZreyMovements : MonoBehaviour
     private bool canCombatMove = false;
     private PlayerHealth playerHealth;
     private bool isBeingKnockedBack = false;
-
+    [SerializeField] private AnimationCurve knockbackCurve;
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
@@ -449,19 +449,32 @@ public class ZreyMovements : MonoBehaviour
         isAttackLocked = true;
         rb.velocity = Vector2.zero;
 
+        Vector2 rawDirection = transform.position - source.position;
+        Vector2 knockbackDirection = new Vector2(rawDirection.x, 0).normalized;
+
         Vector3 startPosition = transform.position;
-        Vector2 knockbackDirection = (transform.position - source.position).normalized;
         Vector3 endPosition = startPosition + (Vector3)knockbackDirection * distance;
 
         float elapsedTime = 0f;
         while (elapsedTime < duration)
         {
-            transform.position = Vector3.Lerp(startPosition, endPosition, elapsedTime / duration);
+            // --- THIS IS THE GUARANTEED FIX FOR SMOOTHNESS ---
+            // 1. Calculate our progress through the duration (a value from 0 to 1).
+            float progress = elapsedTime / duration;
+
+            // 2. Use the Animation Curve to get the "eased" progress.
+            //    This is the magic part. The curve remaps the linear progress to a smooth curve.
+            float curveValue = knockbackCurve.Evaluate(progress);
+
+            // 3. Use Vector3.Lerp, but pass it the NEW, curved progress value.
+            transform.position = Vector3.Lerp(startPosition, endPosition, curveValue);
+            // --- END OF FIX ---
+
             elapsedTime += Time.deltaTime;
             yield return null;
         }
-        transform.position = endPosition;
 
+        transform.position = endPosition;
         isAttackLocked = false;
     }
 

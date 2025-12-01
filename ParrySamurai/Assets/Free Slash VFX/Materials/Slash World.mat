@@ -8,8 +8,9 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: Slash World
-  m_Shader: {fileID: -6465566751694194690, guid: 611663b87192dbd45be65b042f60fe5e,
-    type: 3}
+  m_Shader: {fileID: -6465566751694194690, guid: 611663b87192dbd45be65b042f60fe5e, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
   - _SURFACE_TYPE_TRANSPARENT
   m_InvalidKeywords: []
@@ -23,6 +24,7 @@ Material:
   - DepthOnly
   - MOTIONVECTORS
   - SHADOWCASTER
+  m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
@@ -67,7 +69,7 @@ Material:
     - _ColorPower: 3
     - _ColorStrength: 20
     - _Cull: 0
-    - _Distortion: 0.0176
+    - _Distortion: 0
     - _DistortionAlpha: 0
     - _DistortionEnabled: 1
     - _DistortionSpeed: 0

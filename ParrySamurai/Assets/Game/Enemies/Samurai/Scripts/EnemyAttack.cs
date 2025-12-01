@@ -31,6 +31,8 @@ public class EnemyAttack : MonoBehaviour
 
     // --- Animation Hashes ---
     private readonly int attackTriggerHash = Animator.StringToHash("attack");
+    private readonly int attack2TriggerHash = Animator.StringToHash("attack2");
+    private readonly int attack3TriggerHash = Animator.StringToHash("attack3");
 
     [Header("Damage Settings")]
     [Tooltip("The amount of damage this attack deals.")]
@@ -41,13 +43,23 @@ public class EnemyAttack : MonoBehaviour
     [SerializeField] private Vector2 damageAreaSize = new Vector2(1.5f, 1f);
     [Tooltip("The layer the player is on, so we know who to damage.")]
     [SerializeField] private LayerMask playerLayer;
-
-// --- State Control ---
+    private bool isPerformingCombo = false;
+    private int comboStep = 0;
+    // --- State Control ---
     private bool isDamageFrameActive = false;
     private bool hasDealtDamageThisAttack = false;
     private EnemyHealth healthScript;
   
     private bool isPerformingRangedAttack = false;
+    [Header("Heavy Attack Settings")]
+    [SerializeField] private int heavyAttackDamage = 40;
+    [SerializeField] private float heavyKnockbackDistance = 5f;
+    [SerializeField] private float heavyKnockbackDuration = 0.4f;
+    private readonly int heavyTakeDamageTriggerHash = Animator.StringToHash("HeavyTakeDamage");
+    private bool isHeavyDamageFrameActive = false;
+    private bool hasDealtHeavyDamageThisAttack = false;
+
+
     void Awake()
     {
         animator = GetComponent<Animator>();
@@ -76,7 +88,10 @@ public class EnemyAttack : MonoBehaviour
 
     void Update()
     {
-
+        if (isPerformingCombo)
+        {
+            return;
+        }
         if (isPerformingRangedAttack)
         {
             return;
@@ -90,9 +105,82 @@ public class EnemyAttack : MonoBehaviour
         float distanceToPlayer = Vector2.Distance(attackRangeOrigin.position, playerTarget.position);
 
         // If the player is in range, perform the attack.
+
         if (distanceToPlayer <= attackRange)
         {
-            PerformAttack();
+            // --- THIS IS THE KEY CHANGE ---
+            // Instead of PerformAttack(), we now call StartCombo().
+            StartCombo();
+            // --- END OF CHANGE ---
+        }
+    }
+    private void StartCombo()
+    {
+        if (!canAttack) return;
+
+        Debug.Log("<color=orange>--- ENEMY COMBO STARTED ---</color>");
+        canAttack = false;
+        isPerformingCombo = true;
+        comboStep = 1;
+
+        // Tell the health script to activate the damage shield.
+        if (healthScript != null)
+        {
+            healthScript.ActivateComboArmor();
+        }
+
+        // Trigger the first attack animation.
+        animator.SetTrigger(attackTriggerHash);
+    }
+
+    // --- THIS NEW METHOD IS CALLED BY ANIMATION EVENTS ---
+    public void TriggerNextComboAttack()
+    {
+        comboStep++;
+        if (comboStep == 2)
+        {
+            animator.SetTrigger(attack2TriggerHash);
+        }
+        else if (comboStep == 3)
+        {
+            animator.SetTrigger(attack3TriggerHash);
+        }
+        // If comboStep > 3, it means the combo is over.
+    }
+
+    // --- THIS NEW METHOD IS CALLED BY AN ANIMATION EVENT AT THE END OF THE LAST ATTACK ---
+    public void FinishCombo()
+    {
+        Debug.Log("<color=green>--- ENEMY COMBO FINISHED ---</color>");
+        isPerformingCombo = false;
+        comboStep = 0;
+
+        // Tell the health script to deactivate the damage shield.
+        if (healthScript != null)
+        {
+            healthScript.DeactivateComboArmor();
+        }
+
+        // Start the master cooldown timer.
+        StartCoroutine(AttackCooldownCoroutine());
+    }
+
+    // --- THIS NEW METHOD IS CALLED BY AN ANIMATION EVENT ON THE 3RD ATTACK ---
+    public void TriggerHeavyKnockback()
+    {
+        // This method only handles the damage and knockback logic.
+        // It's separate from CheckForPlayerDamage for clarity.
+        Collider2D playerHit = Physics2D.OverlapBox(damagePoint.position, damageAreaSize, 0f, playerLayer);
+
+        if (playerHit != null)
+        {
+            PlayerHealth playerHealth = playerHit.GetComponent<PlayerHealth>();
+            if (playerHealth != null)
+            {
+                Debug.Log("<color=red>Heavy attack landed! Applying massive knockback.</color>");
+                // We will create this new method in PlayerHealth.
+                playerHealth.TakeHeavyDamage(heavyAttackDamage, transform, heavyKnockbackDistance, heavyKnockbackDuration, heavyTakeDamageTriggerHash);
+            }
         }
     }
     void FixedUpdate()
@@ -101,6 +189,47 @@ public class EnemyAttack : MonoBehaviour
         {
             CheckForPlayerDamage();
         }
+
+        // --- THIS IS THE GUARANTEED FIX ---
+        // Check for heavy attack damage.
+        if (isHeavyDamageFrameActive && !isPerformingRangedAttack)
+        {
+            CheckForHeavyPlayerDamage();
+        }
+    }
+    private void CheckForHeavyPlayerDamage()
+    {
+        if (hasDealtHeavyDamageThisAttack) return; // Only deal damage once per heavy attack.
+
+        Collider2D playerHit = Physics2D.OverlapBox(damagePoint.position, damageAreaSize, 0f, playerLayer);
+
+        if (playerHit != null)
+        {
+            PlayerHealth playerHealth = playerHit.GetComponent<PlayerHealth>();
+            if (playerHealth != null)
+            {
+                Debug.Log("<color=red>Heavy attack landed via FixedUpdate! Applying massive knockback.</color>");
+                // Call the new TakeHeavyDamage method.
+                playerHealth.TakeHeavyDamage(heavyAttackDamage, transform, heavyKnockbackDistance, heavyKnockbackDuration, heavyTakeDamageTriggerHash);
+                hasDealtHeavyDamageThisAttack = true; // Mark damage as dealt for this heavy attack.
+            }
+        }
+    }
+  
+    public void StartHeavyDamageDetection()
+    {
+        isHeavyDamageFrameActive = true;
+        hasDealtHeavyDamageThisAttack = false; // Reset for the new heavy attack.
+        Debug.Log("<color=red>Heavy Damage Detection STARTED.</color>");
+    }
+
+    /// <summary>
+    /// Called by an animation event to end the damage window for the heavy attack.
+    /// </summary>
+    public void StopHeavyDamageDetection()
+    {
+        isHeavyDamageFrameActive = false;
+        Debug.Log("<color=red>Heavy Damage Detection STOPPED.</color>");
     }
     public void SetRangedAttackState(bool isRanged)
     {

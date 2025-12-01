@@ -63,6 +63,10 @@ public class EnemyAI : MonoBehaviour
 
     void Update()
     {
+        if (attackScript != null && !attackScript.CanAttack())
+        {
+            return;
+        }
         // The brain does not think if it's locked or stunned.
         if (isLocked || (healthScript != null && healthScript.IsStunned()))
         {

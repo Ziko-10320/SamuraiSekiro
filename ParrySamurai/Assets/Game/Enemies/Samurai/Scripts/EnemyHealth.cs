@@ -76,7 +76,9 @@ public class EnemyHealth : MonoBehaviour
     [Tooltip("The FLIPPED particle system prefab for the body blood effect.")]
     [SerializeField] private ParticleSystem bloodBodyEffectPrefab_Flipped; 
     [Tooltip("The FLIPPED transform where the body blood should spawn.")]
-    [SerializeField] private Transform bloodBodySpawnPoint_Flipped; 
+    [SerializeField] private Transform bloodBodySpawnPoint_Flipped;
+    private bool isInCombo = false;
+    private bool hasTakenDamageThisCombo = false;
     void Awake()
     {
         currentHealth = maxHealth;
@@ -89,8 +91,17 @@ public class EnemyHealth : MonoBehaviour
             finisherPromptUI.SetActive(false);
         }
     }
+    public void ActivateComboArmor()
+    {
+        isInCombo = true;
+        hasTakenDamageThisCombo = false; // Reset the shield at the start of every combo.
+    }
 
-   
+    public void DeactivateComboArmor()
+    {
+        isInCombo = false;
+    }
+
     public void StartParryState()
     {
         // This is called instantly by the AI. No more waiting for animations.
@@ -99,6 +110,36 @@ public class EnemyHealth : MonoBehaviour
 
     public void TakeDamage(int damageAmount, AttackManager playerAttackManager = null)
     {
+        if (isInCombo)
+        {
+            // 2. Check if it has already taken its one allowed hit for this combo.
+            if (hasTakenDamageThisCombo)
+            {
+                Debug.Log("<color=grey>Enemy is in combo and has already taken damage. Ignoring hit.</color>");
+                return; // Do nothing. The enemy is invincible for the rest of the combo.
+            }
+            else
+            {
+                // This is the FIRST hit during the combo.
+                Debug.Log("<color=orange>Enemy took its one allowed hit during the combo.</color>");
+                currentHealth -= damageAmount;
+                hasTakenDamageThisCombo = true; // Flip the switch. No more damage allowed.
+
+                // We do NOT play the "take damage" animation because it would interrupt the combo.
+                // We just play the blood effect.
+                if (bloodEffect != null && bloodEffectSpawnPoint != null)
+                {
+                    ParticleSystem newBloodEffect = Instantiate(bloodEffect, bloodEffectSpawnPoint.position, Quaternion.identity);
+                    newBloodEffect.Play();
+                }
+
+                // Check for death, but don't play animations.
+                if (currentHealth <= 0) Die();
+
+                // IMPORTANT: We stop here. We do not want any other logic (like knockback) to run.
+                return;
+            }
+        }
         // --- PARRY LOGIC (This only runs if we are NOT stunned) ---
         if (!isStunned)
         {
@@ -161,6 +202,11 @@ public class EnemyHealth : MonoBehaviour
         }
         // --- END OF FIX ---
     }
+    public bool IsInUninterruptibleCombo()
+    {
+        return isInCombo;
+    }
+
     private IEnumerator KnockbackCoroutine(Transform source, float distance, float duration)
     {
        
