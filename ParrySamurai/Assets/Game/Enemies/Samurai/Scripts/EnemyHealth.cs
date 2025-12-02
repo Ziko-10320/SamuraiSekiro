@@ -79,6 +79,7 @@ public class EnemyHealth : MonoBehaviour
     [SerializeField] private Transform bloodBodySpawnPoint_Flipped;
     private bool isInCombo = false;
     private bool hasTakenDamageThisCombo = false;
+    public bool isDead { get; private set; } = false;
     void Awake()
     {
         currentHealth = maxHealth;
@@ -318,8 +319,12 @@ public class EnemyHealth : MonoBehaviour
         // --- ADD THIS LOG ---
         Debug.Log("<color=grey>--- ENEMY HEALTH: Parry Window CLOSED (isParrying = false). Animation event SUCCESS. ---</color>", this.gameObject);
     }
-    private void Die()
+    public void Die()
     {
+        if (isDead) return;
+
+        Debug.Log($"<color=red>{gameObject.name} has been slain!</color>");
+        isDead = true;
         // This check is still good. It prevents the method from running multiple times.
         if (isFinishable)
         {
@@ -350,6 +355,7 @@ public class EnemyHealth : MonoBehaviour
             finisherPromptUI.SetActive(true);
         }
     }
+   
     public void CameraShake()
     {
         CameraShakerHandler.Shake(CameraShakeParry);
@@ -411,7 +417,7 @@ public class EnemyHealth : MonoBehaviour
     {
         // This flips the switch, making it impossible to finish this enemy again.
         isFinishable = false;
-
+        isDead = true;
         // It's also a good idea to hide the UI prompt immediately.
         if (finisherPromptUI != null)
         {

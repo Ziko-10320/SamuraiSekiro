@@ -80,6 +80,15 @@ private bool isPerformingFinisher = false;
     [Tooltip("How fast the camera zooms in and out (in seconds).")]
     [SerializeField] private float zoomDuration = 0.5f; 
     private float originalZoomLevel;
+    [Header("Clash Finisher Settings")]
+    [Tooltip("The name of the CLASH finisher trigger for the player's animator.")]
+    [SerializeField] private string clashFinisherTriggerName = "clashFinisher";
+    [Tooltip("The name of the CLASH 'receive finisher' trigger for the enemy's animator.")]
+    [SerializeField] private string clashReceiveFinisherTriggerName = "receiveClashFinisher";
+    private int regularFinisherTriggerHash;
+    private int regularReceiveFinisherTriggerHash;
+    private int clashFinisherTriggerHash;
+    private int clashReceiveFinisherTriggerHash;
 
     [Header("Clash QTE Settings")]
     [Tooltip("The parent GameObject for the QTE UI.")]
@@ -102,6 +111,15 @@ private bool isPerformingFinisher = false;
     [SerializeField] private GameObject enemyWinEffectPrefab;
     [Tooltip("The position where the enemy's victory effect should spawn.")]
     [SerializeField] private Transform enemyWinEffectSpawnPoint;
+    [Header("Clash Knockback - Enemy Wins")]
+    [Tooltip("How far the PLAYER is knocked back when they lose.")]
+    [SerializeField] private float playerKnockbackOnLoss = 5f;
+    [Tooltip("How long the PLAYER's knockback lasts.")]
+    [SerializeField] private float playerKnockbackDuration = 0.4f;
+    [Tooltip("The small recoil distance for the ENEMY when they win.")]
+    [SerializeField] private float enemyRecoilOnWin = 1.5f;
+    [Tooltip("How long the ENEMY's recoil lasts.")]
+    [SerializeField] private float enemyRecoilDuration = 0.2f;
     void Awake()
     {
         if (animator == null) animator = GetComponent<Animator>();
@@ -110,8 +128,10 @@ private bool isPerformingFinisher = false;
     }
     void Start()
     {
-        // ... (your other Start() code is perfect) ...
-        // Convert the string "Clash" into a number for faster access.
+       
+        clashFinisherTriggerHash = Animator.StringToHash(clashFinisherTriggerName);
+        clashReceiveFinisherTriggerHash = Animator.StringToHash(clashReceiveFinisherTriggerName);
+
         clashStateHash = Animator.StringToHash("Clash");
     }
     void Update()
@@ -264,47 +284,113 @@ private bool isPerformingFinisher = false;
 
     private void FinishClash(EnemyAI enemy, int correctPresses)
     {
-        Debug.Log("<color=cyan>--- CLASH SEQUENCE FINISHED ---</color>");
-        EnemyAttack enemyAttack = enemy.GetComponent<EnemyAttack>();
-        if (enemyAttack != null)
-        {
-            Debug.Log("<color=yellow>Manually calling FinishCombo() for the enemy to clean up the interrupted combo.</color>");
-            enemyAttack.FinishCombo();
-        }
-        if (cameraFollowScript != null)
-        {
-            cameraFollowScript.TriggerZoom(originalZoomLevel, zoomDuration);
-        }
-        // --- Phase 4: Judgment ---
+        Debug.Log("<color=cyan>--- CLASH JUDGMENT ---</color>");
+
+        // --- PATH A: PLAYER WINS ---
         if (correctPresses >= qteRequiredWins)
         {
-            Debug.Log("<color=green>PLAYER WINS THE CLASH!</color>");
-            // (We will add the reward logic here later)
-        }
-        else
-        {
-            Debug.Log("<color=red>ENEMY WINS THE CLASH!</color>");
-            if (enemyWinEffectPrefab != null && enemyWinEffectSpawnPoint != null)
+            Debug.Log("<color=green>PLAYER WINS CLASH! Transitioning directly to finisher...</color>");
+
+            // 1. Get the EnemyHealth component.
+            EnemyHealth enemyHealth = enemy.GetComponent<EnemyHealth>();
+            if (enemyHealth == null)
             {
-                Debug.Log("<color=red>Spawning Enemy Win Effect.</color>");
-                Instantiate(enemyWinEffectPrefab, enemyWinEffectSpawnPoint.position, enemyWinEffectSpawnPoint.rotation);
+                Debug.LogError("FATAL: Cannot start finisher, EnemyHealth is null.");
+                // If this fails, we must fall through to the cleanup code below.
             }
-            // (We will add the punishment logic here later)
+            else
+            {
+                // 2. Start the finisher sequence.
+                StartCoroutine(ClashFinisherSequence(enemyHealth));
+
+                // 3. IMPORTANT: RETURN. Do NOT run any of the cleanup code below.
+                //    The finisher sequence is now in full control.
+                return;
+            }
         }
 
-        // --- Phase 5: Release ---
-        // Deactivate the UI.
-        if (qteUIParent != null) qteUIParent.SetActive(false);
+        // --- PATH B: ENEMY WINS (This code only runs if the player lost) ---
+        Debug.Log("<color=red>ENEMY WINS CLASH! Applying punishment and cleaning up.</color>");
 
-        // Stop the looping animations.
+        // Apply punishment effects and knockbacks.
+        // ... (Your existing enemy win logic is perfect here) ...
+        if (enemyWinEffectPrefab != null && enemyWinEffectSpawnPoint != null) { /* ... */ }
+        if (playerMovement != null) { playerMovement.ApplyKnockback(enemy.transform, playerKnockbackOnLoss, playerKnockbackDuration); }
+        if (enemy != null) { enemy.ApplyKnockback(this.transform, enemyRecoilOnWin, enemyRecoilDuration); }
+
+
+        // --- FULL CLASH CLEANUP (Only runs on ENEMY win) ---
+        Debug.Log("Cleaning up clash state after enemy victory.");
+
+        // Manually clean up the enemy's combo state.
+        EnemyAttack enemyAttack = enemy.GetComponent<EnemyAttack>();
+        if (enemyAttack != null) { enemyAttack.FinishCombo(); }
+
+        // Stop effects and UI.
+        if (clashEffect != null) { clashEffect.Stop(); }
+        if (qteUIParent != null) { qteUIParent.SetActive(false); }
+
+        // Reset camera zoom.
+        if (cameraFollowScript != null) { cameraFollowScript.TriggerZoom(originalZoomLevel, zoomDuration); }
+
+        // Stop looping animations.
         animator.SetBool("isClashing", false);
-        enemy.GetComponent<Animator>().SetBool("isClashing", false);
+        if (enemy != null) { enemy.GetComponent<Animator>().SetBool("isClashing", false); }
 
-        // Unlock the player and enemy.
+        // Unlock characters.
         playerMovement.SetAttacking(false);
-        enemy.SetClashState(false);
+        if (enemy != null) { enemy.SetClashState(false); }
 
         isClashing = false;
+    }
+    private IEnumerator ClashFinisherSequence(EnemyHealth targetEnemy)
+    {
+        Debug.Log("--- CLASH FINISHER SEQUENCE STARTED (inheriting clash state) ---");
+        isPerformingFinisher = true;
+        currentFinisherTarget = targetEnemy;
+        targetEnemy.MarkAsFinished(); // This also sets the enemy's isDead flag now.
+
+
+        playerMovement.FlipTowards(targetEnemy.transform);
+
+        // Trigger the animations.
+        animator.SetTrigger(clashFinisherTriggerHash);
+        targetEnemy.GetComponent<Animator>().SetTrigger(clashReceiveFinisherTriggerHash);
+
+        yield return null;
+    }
+    public void OnClashFinisherComplete()
+    {
+        Debug.Log("<color=green>FINISHER COMPLETE. Executing the enemy.</color>");
+
+        // --- THIS IS THE GUARANTEED FIX ---
+        // 1. Check if we have a valid target to kill.
+        if (currentFinisherTarget != null)
+        {
+            // The Die() method has already been called by MarkAsFinished(), but we can ensure it.
+            currentFinisherTarget.Die();
+            // Destroy the enemy's GameObject.
+            Destroy(currentFinisherTarget.gameObject, 1f);
+            Debug.Log($"Destroying {currentFinisherTarget.name}.");
+        }
+        if (playerMovement != null)
+        {
+           
+            playerMovement.SetAttacking(false);
+            Debug.Log("PlayerMovement state has been reset.");
+        }
+        isPerformingFinisher = false;
+        currentFinisherTarget = null; // Set to null AFTER we've used it.
+
+        if (cameraFollowScript != null)
+        {
+            // We need to use the original zoom level we stored when the finisher started.
+            cameraFollowScript.TriggerZoom(originalZoomLevel, zoomDuration);
+            Debug.Log("Camera zoom has been reset.");
+        }
+        isPerformingFinisher = false;
+        isClashing = false; // Reset this too, just to be 100% safe.
+        currentFinisherTarget = null;
     }
     private bool TryPerformFinisher()
     {

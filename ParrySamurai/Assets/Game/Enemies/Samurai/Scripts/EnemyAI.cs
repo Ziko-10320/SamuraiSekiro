@@ -52,6 +52,7 @@ public class EnemyAI : MonoBehaviour
     [SerializeField] private GameObject slashProjectilePrefab;
     [SerializeField] private Transform projectileSpawnPoint;
     private bool isClashing = false;
+    private Coroutine knockbackCoroutine;
     void Awake()
     {
         animator = GetComponent<Animator>();
@@ -63,6 +64,11 @@ public class EnemyAI : MonoBehaviour
 
     void Update()
     {
+        if (healthScript != null && healthScript.isDead)
+        {
+            // If dead, do ABSOLUTELY NOTHING. Stop the entire AI loop.
+            return;
+        }
         if (isLocked || isClashing || (healthScript != null && healthScript.IsStunned()))
         {
             return;
@@ -284,5 +290,54 @@ public class EnemyAI : MonoBehaviour
         yield return new WaitForSeconds(0.5f);
         isReadyToParry = false;
     }
-   
+    public void ApplyKnockback(Transform source, float distance, float duration)
+    {
+        // Failsafe: If a knockback is already running, stop it before starting a new one.
+        if (knockbackCoroutine != null)
+        {
+            StopCoroutine(knockbackCoroutine);
+        }
+        // Start the coroutine ON THIS SCRIPT (the EnemyAI script).
+        knockbackCoroutine = StartCoroutine(KnockbackCoroutine(source, distance, duration));
+    }
+
+    // This coroutine does the actual work. It should be private.
+    private IEnumerator KnockbackCoroutine(Transform source, float distance, float duration)
+    {
+        isLocked = true;
+        rb.velocity = Vector2.zero;
+
+        // --- THIS IS THE GUARANTEED HORIZONTAL FIX ---
+
+        // 1. Calculate the raw direction from the source (player) to us (enemy).
+        Vector2 rawDirection = transform.position - source.position;
+
+        // 2. Create a NEW, flattened direction vector. We ONLY take the 'x' value.
+        //    The 'y' and 'z' are forced to be 0.
+        Vector2 horizontalDirection = new Vector2(rawDirection.x, 0f);
+
+        // 3. Normalize the new horizontal direction to get a clean unit vector.
+        Vector2 knockbackDirection = horizontalDirection.normalized;
+
+        // --- END OF FIX ---
+
+        // The rest of the code now uses the guaranteed-horizontal 'knockbackDirection'.
+        Vector3 startPosition = transform.position;
+        Vector3 endPosition = startPosition + (Vector3)knockbackDirection * distance;
+
+        float elapsedTime = 0f;
+        while (elapsedTime < duration)
+        {
+            // Using SmoothStep for a better feel.
+            float t = Mathf.SmoothStep(0f, 1f, elapsedTime / duration);
+            transform.position = Vector3.Lerp(startPosition, endPosition, t);
+            elapsedTime += Time.deltaTime;
+            yield return null;
+        }
+
+        // Final position set, just in case.
+        transform.position = endPosition;
+        isLocked = false;
+    }
 }
+
