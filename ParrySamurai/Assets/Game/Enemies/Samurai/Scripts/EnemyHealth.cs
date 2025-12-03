@@ -80,6 +80,7 @@ public class EnemyHealth : MonoBehaviour
     private bool isInCombo = false;
     private bool hasTakenDamageThisCombo = false;
     public bool isDead { get; private set; } = false;
+    private bool isPerformingCounterAttack = false;
     void Awake()
     {
         currentHealth = maxHealth;
@@ -105,10 +106,15 @@ public class EnemyHealth : MonoBehaviour
 
     public void StartParryState()
     {
-        // This is called instantly by the AI. No more waiting for animations.
         isParrying = true;
+        isPerformingCounterAttack = false; // Regular parry, not a counter
     }
-
+    public void StartCounterAttackState()
+    {
+        isParrying = false;
+        isPerformingCounterAttack = true;
+        Debug.Log("<color=red>COUNTER-ATTACK STATE ACTIVE</color>");
+    }
     public void TakeDamage(int damageAmount, AttackManager playerAttackManager = null)
     {
         if (isInCombo)
@@ -154,12 +160,20 @@ public class EnemyHealth : MonoBehaviour
             if (isParrying)
             {
                 Debug.Log("<color=cyan>PARRY SUCCESS!</color>");
+                if (enemyAI != null) { enemyAI.OnSuccessfulParry(); }
                 // ... (All your parry success logic is perfect) ...
                 CameraShakerHandler.Shake(CameraShakeParry);
                 if (parrySparksEffect != null) { Instantiate(parrySparksEffect, parrySparksSpawnPoint.position, Quaternion.identity); }
                 if (playerAttackManager != null && enemyAI != null) { playerAttackManager.OnMyAttackWasParried(enemyAI); }
                 ZreyMovements playerMovement = FindObjectOfType<ZreyMovements>();
-                if (playerMovement != null) { playerMovement.GetParried(this.transform); }
+                if (playerMovement != null) 
+                {
+                    playerMovement.GetParried(this.transform);
+                    if (enemyAI != null)
+                    {
+                        enemyAI.ApplyKnockback(playerMovement.transform, parryKnockbackForce, parryKnockbackDuration);
+                    }
+                }
 
                 // If we parry, we stop everything. Do not take damage.
                 return;
@@ -207,7 +221,11 @@ public class EnemyHealth : MonoBehaviour
     {
         return isInCombo;
     }
-
+    public void EndCounterAttackState()
+    {
+        isPerformingCounterAttack = false;
+        Debug.Log("<color=grey>Counter-attack state ended</color>");
+    }
     private IEnumerator KnockbackCoroutine(Transform source, float distance, float duration)
     {
        
@@ -229,12 +247,23 @@ public class EnemyHealth : MonoBehaviour
     /// <summary>
     /// This is the public method the PlayerHealth script will call on a successful parry.
     /// </summary>
-    public void GetParried(Transform parryingPlayer) // We now accept the player's transform
+    public void GetParried(Transform parryingPlayer)
     {
-        // We need the player's transform to calculate the knockback direction reliably.
         if (parryingPlayer == null) return;
 
-        StartCoroutine(StunCoroutine(parryingPlayer));
+        // ONLY stun if this was a counter-attack
+        if (isPerformingCounterAttack)
+        {
+            Debug.Log("<color=red>Counter-attack was parried! Applying stun.</color>");
+            StartCoroutine(StunCoroutine(parryingPlayer));
+            isPerformingCounterAttack = false; // Reset flag
+        }
+        else
+        {
+            Debug.Log("<color=yellow>Regular attack was parried, but no stun (not a counter)</color>");
+            // No stun, just reset the flag
+            isParrying = false;
+        }
     }
 
     private IEnumerator StunCoroutine(Transform parryingPlayer)

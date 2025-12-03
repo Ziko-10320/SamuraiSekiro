@@ -11262,6 +11262,13 @@ AnimationClip:
     floatParameter: 0
     intParameter: 0
     messageOptions: 0
+  - time: 0.1
+    functionName: StartCounterAttackState
+    data: 
+    objectReferenceParameter: {fileID: 0}
+    floatParameter: 0
+    intParameter: 0
+    messageOptions: 0
   - time: 0.13636364
     functionName: TriggerAttackEffect
     data: 
@@ -11278,6 +11285,13 @@ AnimationClip:
     messageOptions: 0
   - time: 0.45454547
     functionName: StopDamageDetection
+    data: 
+    objectReferenceParameter: {fileID: 0}
+    floatParameter: 0
+    intParameter: 0
+    messageOptions: 0
+  - time: 0.5
+    functionName: EndCounterAttackState
     data: 
     objectReferenceParameter: {fileID: 0}
     floatParameter: 0

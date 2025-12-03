@@ -49,7 +49,8 @@ public class EnemyAttack : MonoBehaviour
     private bool isDamageFrameActive = false;
     private bool hasDealtDamageThisAttack = false;
     private EnemyHealth healthScript;
-  
+    private EnemyAI enemyAi;
+
     private bool isPerformingRangedAttack = false;
     [Header("Heavy Attack Settings")]
     [SerializeField] private int heavyAttackDamage = 40;
@@ -64,6 +65,7 @@ public class EnemyAttack : MonoBehaviour
     {
         animator = GetComponent<Animator>();
         healthScript = GetComponent<EnemyHealth>();
+        enemyAi= GetComponent<EnemyAI>();
         // Failsafe: If no origin is set, use the enemy's own transform.
         if (attackRangeOrigin == null)
         {
@@ -108,12 +110,26 @@ public class EnemyAttack : MonoBehaviour
 
         if (distanceToPlayer <= attackRange)
         {
-            // --- THIS IS THE KEY CHANGE ---
-            // Instead of PerformAttack(), we now call StartCombo().
-            StartCombo();
-            // --- END OF CHANGE ---
+            if (enemyAi.isPrioritizingParry)
+            {
+                // Parry mode: mostly wait, but occasionally attack
+                float roll = Random.Range(0f, 1f);
+                if (roll <= enemyAi.passiveAttackChance)
+                {
+                    Debug.Log("<color=yellow>Passive attack while in parry mode</color>");
+                    StartCombo();
+                }
+                // Otherwise, do nothing - wait for player to attack so we can parry
+            }
+            else
+            {
+                // Combo mode: attack aggressively
+                StartCombo();
+            }
+            return;
         }
     }
+
     private void StartCombo()
     {
         if (!canAttack) return;
@@ -160,7 +176,10 @@ public class EnemyAttack : MonoBehaviour
         {
             healthScript.DeactivateComboArmor();
         }
-
+        if (enemyAi != null)
+        {
+            enemyAi.OnComboFinished();
+        }
         // Start the master cooldown timer.
         StartCoroutine(AttackCooldownCoroutine());
     }

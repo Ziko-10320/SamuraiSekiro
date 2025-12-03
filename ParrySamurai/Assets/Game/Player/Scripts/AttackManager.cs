@@ -14,10 +14,13 @@ public class AttackManager : MonoBehaviour
     [Header("Effects")]
     [SerializeField] private ParticleSystem slashEffect1;
     [SerializeField] private ParticleSystem slashEffect2;
+    [SerializeField] private ParticleSystem slashEffect3;
 
     [Header("Combo Settings")]
     private int comboStep = 0;
     private bool isAttacking = false;
+    private bool canReceiveInput = false; // The magic window boolean
+    private bool inputReceived = false;
     private bool attackQueued = false;
 
     [Header("Attack Movement")]
@@ -37,6 +40,8 @@ public class AttackManager : MonoBehaviour
     // --- Animation Hashes ---
     private readonly int attack1TriggerHash = Animator.StringToHash("attack1");
     private readonly int attack2TriggerHash = Animator.StringToHash("attack2");
+    private readonly int attack3TriggerHash = Animator.StringToHash("attack3");
+
     private Rigidbody2D rb;
 
     [Header("Damage Settings")]
@@ -151,19 +156,14 @@ private bool isPerformingFinisher = false;
 
         // --- THIS IS THE FINAL, GUARANTEED FIX ---
         // We add ONE condition: !playerHealth.isBlocking
-        // This prevents an attack from being queued while the player is holding the block button.
         if (Input.GetMouseButtonDown(0) && playerMovement.IsGrounded() && !playerMovement.IsDashing())
         {
-            // --- THIS IS THE NEW FINISHER LOGIC ---
-            // 1. Try to perform a finisher first.
-            bool finisherFound = TryPerformFinisher();
+            // Don't attack if a finisher is possible or if blocking.
+            if (TryPerformFinisher()) return;
+            if (playerHealth != null && playerHealth.isBlocking) return;
 
-            // 2. If a finisher was NOT found, then queue a normal attack.
-            if (!finisherFound && (playerHealth == null || !playerHealth.isBlocking))
-            {
-                attackQueued = true;
-            }
-            // --- END OF NEW LOGIC ---
+            // Set the flag. This is our "input buffer".
+            attackQueued = true;
         }
         // --- END OF FINAL, GUARANTEED FIX ---
 
@@ -499,28 +499,34 @@ private bool isPerformingFinisher = false;
     }
     private void HandleAttacks()
     {
+        // If no attack was buffered, do nothing.
         if (!attackQueued) return;
 
-        if (isAttacking)
-        {
-            if (comboStep == 1)
-            {
-                PerformAttack(2);
-            }
-        }
-        else
+        // Consume the buffered input.
+        attackQueued = false;
+
+        // Decide which attack to perform based on the current combo step.
+        if (comboStep == 0)
         {
             PerformAttack(1);
         }
-        attackQueued = false;
+        else if (comboStep == 1)
+        {
+            PerformAttack(2);
+        }
+        else if (comboStep == 2)
+        {
+            PerformAttack(3);
+        }
     }
 
     private void PerformAttack(int step)
     {
+        // This check prevents starting a combo from step 2 or 3.
         if (!isAttacking && step > 1) return;
 
         isAttacking = true;
-        playerMovement.SetAttacking(true);
+        playerMovement.SetAttacking(true); // Lock movement.
 
         if (step == 1)
         {
@@ -531,6 +537,11 @@ private bool isPerformingFinisher = false;
         {
             animator.SetTrigger(attack2TriggerHash);
             comboStep = 2;
+        }
+        else if (step == 3)
+        {
+            animator.SetTrigger(attack3TriggerHash);
+            comboStep = 3;
         }
     }
     public void OnMyAttackWasParried(EnemyAI parryingEnemy) // We now need to know WHO parried us.
@@ -597,15 +608,22 @@ private bool isPerformingFinisher = false;
         }
     }
 
+
     public void FinishAttack()
     {
-        isAttacking = false;
-        playerMovement.SetAttacking(false);
-        comboStep = 0;
-
+        // At the end of an animation, we check if another attack was buffered.
         if (attackQueued)
         {
+            // If an attack was buffered during the animation, immediately perform the next one.
             HandleAttacks();
+        }
+        else
+        {
+            // If no attack was buffered, the combo is over. Reset everything.
+            Debug.Log("Combo Finished. Resetting state.");
+            isAttacking = false;
+            playerMovement.SetAttacking(false);
+            comboStep = 0;
         }
     }
 
@@ -617,6 +635,10 @@ private bool isPerformingFinisher = false;
     public void TriggerSlashEffect2()
     {
         if (slashEffect2 != null) slashEffect2.Play();
+    }
+    public void TriggerSlashEffect3()
+    {
+        if (slashEffect3 != null) slashEffect3.Play();
     }
     void FixedUpdate()
     {

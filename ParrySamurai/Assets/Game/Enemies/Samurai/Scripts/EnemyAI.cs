@@ -53,6 +53,14 @@ public class EnemyAI : MonoBehaviour
     [SerializeField] private Transform projectileSpawnPoint;
     private bool isClashing = false;
     private Coroutine knockbackCoroutine;
+    [Header("Parry Priority System")]
+    [SerializeField] private int successfulParriesRequired = 3;
+    private int currentParryCount = 0;
+    [HideInInspector] public bool isPrioritizingParry = true; // Start with parry priority
+    [Tooltip("Chance to attack even while prioritizing parry")]
+    [Range(0f, 1f)]
+    [SerializeField] public float passiveAttackChance = 0.3f;
+
     void Awake()
     {
         animator = GetComponent<Animator>();
@@ -179,22 +187,20 @@ public class EnemyAI : MonoBehaviour
     {
         if (!isReadyToParry) return;
 
+        // Increase parry chance when prioritizing parry
+        float effectiveParryChance = isPrioritizingParry ? 0.9f : parryChance;
+
         float roll = Random.Range(0f, 1f);
-        if (roll <= parryChance)
+        if (roll <= effectiveParryChance)
         {
-            // --- THIS IS THE GUARANTEED FIX ---
-            // 1. DECISION: PARRY!
             Debug.Log("<color=cyan>ENEMY AI: Decision is PARRY. Forcing state now.</color>");
 
-            // 2. IMMEDIATELY tell the health script to enter the parry state.
             if (healthScript != null)
             {
-                healthScript.StartParryState(); // We will create this new method.
+                healthScript.StartParryState();
             }
 
-            // 3. Trigger the animation.
             animator.SetTrigger(parryTriggerHash);
-            // --- END OF FIX ---
         }
 
         isReadyToParry = false;
@@ -259,6 +265,10 @@ public class EnemyAI : MonoBehaviour
 
         // Fire the trigger for the actual counter-attack animation.
         Debug.Log("Warning finished. Firing 'counterAttack' trigger!");
+        if (healthScript != null)
+        {
+            healthScript.StartCounterAttackState();
+        }
         animator.SetTrigger(counterAttackTriggerHash);
 
         // --- The logic to disable the glint is also perfect ---
@@ -338,6 +348,29 @@ public class EnemyAI : MonoBehaviour
         // Final position set, just in case.
         transform.position = endPosition;
         isLocked = false;
+    }
+    public void OnSuccessfulParry()
+    {
+        if (isPrioritizingParry)
+        {
+            currentParryCount++;
+            Debug.Log($"<color=cyan>Parry #{currentParryCount} successful!</color>");
+
+            if (currentParryCount >= successfulParriesRequired)
+            {
+                // Switch to combo priority
+                isPrioritizingParry = false;
+                currentParryCount = 0;
+                Debug.Log("<color=orange>SWITCHING TO COMBO PRIORITY MODE!</color>");
+            }
+        }
+    }
+    public void OnComboFinished()
+    {
+        // Reset to parry priority after combo
+        isPrioritizingParry = true;
+        currentParryCount = 0;
+        Debug.Log("<color=cyan>RESET TO PARRY PRIORITY MODE!</color>");
     }
 }
 
