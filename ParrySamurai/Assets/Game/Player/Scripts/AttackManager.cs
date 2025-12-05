@@ -19,9 +19,8 @@ public class AttackManager : MonoBehaviour
     [Header("Combo Settings")]
     private int comboStep = 0;
     private bool isAttacking = false;
-    private bool canReceiveInput = false; // The magic window boolean
-    private bool inputReceived = false;
-    private bool attackQueued = false;
+    private float lastAttackTime = 0f;
+    [SerializeField] private float comboResetTime = 1f;
 
     [Header("Attack Movement")]
     [Tooltip("The speed of the lunge during an attack.")]
@@ -54,11 +53,7 @@ public class AttackManager : MonoBehaviour
     [Tooltip("The layer the enemies are on, so we know who to damage.")]
     [SerializeField] private LayerMask enemyLayer;
     [SerializeField] private PlayerHealth playerHealth;
-    [Header("Guard Break Settings")]
-    [Tooltip("How many times the player must be parried to have their guard broken.")]
-    [SerializeField] private int parriesUntilGuardBreak = 3;
-    [Tooltip("How long the player cannot attack after a guard break (in seconds).")]
-    [SerializeField]private float guardBreakAttackLockout = 1.5f;
+    
 
     // --- State Control ---
     private bool isDamageFrameActive = false;
@@ -72,7 +67,7 @@ public class AttackManager : MonoBehaviour
     [Tooltip("The layer the enemies are on.")]
     [SerializeField] private LayerMask finisherEnemyLayer; // This should be your normal 'enemyLayer'"
 
-private bool isPerformingFinisher = false;
+    private bool isPerformingFinisher = false;
     private EnemyHealth currentFinisherTarget;
     // --- ADD THESE NEW ANIMATION HASHES ---
     private readonly int performFinisherTriggerHash = Animator.StringToHash("PerformFinisher");
@@ -145,29 +140,36 @@ private bool isPerformingFinisher = false;
         {
             return;
         }
-        if (isPerformingFinisher)
-        {
-            return;
-        }
         if (isAttackDisabled)
         {
             return;
         }
 
-        // --- THIS IS THE FINAL, GUARANTEED FIX ---
-        // We add ONE condition: !playerHealth.isBlocking
-        if (Input.GetMouseButtonDown(0) && playerMovement.IsGrounded() && !playerMovement.IsDashing())
+        // Reset combo if too much time has passed
+        if (Time.time - lastAttackTime > comboResetTime && comboStep > 0)
         {
-            // Don't attack if a finisher is possible or if blocking.
+            comboStep = 0;
+            Debug.Log("Combo reset due to timeout");
+        }
+
+        // SIMPLE: Only accept input when NOT attacking
+        if (Input.GetMouseButtonDown(0) && !isAttacking && playerMovement.IsGrounded() && !playerMovement.IsDashing())
+        {
             if (TryPerformFinisher()) return;
             if (playerHealth != null && playerHealth.isBlocking) return;
 
-            // Set the flag. This is our "input buffer".
-            attackQueued = true;
-        }
-        // --- END OF FINAL, GUARANTEED FIX ---
+            // Update the last attack time
+            lastAttackTime = Time.time;
 
-        HandleAttacks();
+            // Increment combo step
+            comboStep++;
+            if (comboStep > 3)
+            {
+                comboStep = 1; // Reset to first attack if exceeds 3
+            }
+
+            PerformAttack(comboStep);
+        }
     }
     public void StartClash(EnemyAI enemy)
     {
@@ -478,112 +480,44 @@ private bool isPerformingFinisher = false;
         isPerformingFinisher = false;
         playerMovement.SetAttacking(false);
     }
-  
+
     public void CancelAttack()
     {
-        // This method is called when the player gets hit.
-        // It resets all the attack-related states.
         isAttacking = false;
-        attackQueued = false;
         comboStep = 0;
+        lastAttackTime = 0f;
 
-        // This is the most important line: it unlocks the movement script.
         if (playerMovement != null)
         {
-            playerMovement.SetAttacking(false); // This sets isAttackLocked = false
+            playerMovement.SetAttacking(false);
         }
 
-        // You might also want to stop the attack animation immediately.
-        // This prevents the player from sliding while in the "hurt" animation.
-        animator.Play("Idle"); // Or whatever your default state is called.
+        animator.Play("Idle");
     }
-    private void HandleAttacks()
-    {
-        // If no attack was buffered, do nothing.
-        if (!attackQueued) return;
-
-        // Consume the buffered input.
-        attackQueued = false;
-
-        // Decide which attack to perform based on the current combo step.
-        if (comboStep == 0)
-        {
-            PerformAttack(1);
-        }
-        else if (comboStep == 1)
-        {
-            PerformAttack(2);
-        }
-        else if (comboStep == 2)
-        {
-            PerformAttack(3);
-        }
-    }
+   
 
     private void PerformAttack(int step)
     {
-        // This check prevents starting a combo from step 2 or 3.
-        if (!isAttacking && step > 1) return;
-
         isAttacking = true;
-        playerMovement.SetAttacking(true); // Lock movement.
+        playerMovement.SetAttacking(true);
 
         if (step == 1)
         {
             animator.SetTrigger(attack1TriggerHash);
-            comboStep = 1;
+            Debug.Log("Attack 1");
         }
         else if (step == 2)
         {
             animator.SetTrigger(attack2TriggerHash);
-            comboStep = 2;
+            Debug.Log("Attack 2");
         }
         else if (step == 3)
         {
             animator.SetTrigger(attack3TriggerHash);
-            comboStep = 3;
+            Debug.Log("Attack 3");
         }
     }
-    public void OnMyAttackWasParried(EnemyAI parryingEnemy) // We now need to know WHO parried us.
-    {
-        consecutiveParries++;
-        Debug.Log($"<color=orange>PLAYER was parried! Consecutive parries: {consecutiveParries}</color>");
-
-        if (consecutiveParries >= parriesUntilGuardBreak)
-        {
-            Debug.Log($"<color=red>GUARD BREAK! Player parried {consecutiveParries} times.</color>");
-
-            // 1. Trigger the player's own stun/knockback visuals.
-            if (playerHealth != null)
-            {
-                playerHealth.TriggerGuardBreak();
-            }
-
-            // --- THIS IS THE GUARANTEED FIX ---
-            // 2. COMMAND the enemy that parried us to start its counter-attack.
-            if (parryingEnemy != null)
-            {
-                Debug.Log($"<color=red>Commanding {parryingEnemy.name} to counter-attack!</color>");
-                parryingEnemy.ForceCounterAttack();
-            }
-            // --- END OF FIX ---
-
-            // 3. Start the player's attack lockout coroutine.
-            StartCoroutine(GuardBreakLockoutCoroutine());
-        }
-    }
-    private IEnumerator GuardBreakLockoutCoroutine()
-    {
-        isAttackDisabled = true; // Disable attacking.
-        consecutiveParries = 0;  // Reset the counter.
-
-        yield return new WaitForSeconds(guardBreakAttackLockout);
-
-        isAttackDisabled = false; // Re-enable attacking.
-        Debug.Log("<color=green>Guard Break lockout finished. Player can attack again.</color>");
-    }
-
-
+   
 
     public void PerformLunge()
     {
@@ -609,22 +543,11 @@ private bool isPerformingFinisher = false;
     }
 
 
-    public void FinishAttack()
+    public void EndAttack()
     {
-        // At the end of an animation, we check if another attack was buffered.
-        if (attackQueued)
-        {
-            // If an attack was buffered during the animation, immediately perform the next one.
-            HandleAttacks();
-        }
-        else
-        {
-            // If no attack was buffered, the combo is over. Reset everything.
-            Debug.Log("Combo Finished. Resetting state.");
-            isAttacking = false;
-            playerMovement.SetAttacking(false);
-            comboStep = 0;
-        }
+        isAttacking = false;
+        playerMovement.SetAttacking(false);
+        Debug.Log($"Attack {comboStep} ended. Ready for next input.");
     }
 
     public void TriggerSlashEffect1()

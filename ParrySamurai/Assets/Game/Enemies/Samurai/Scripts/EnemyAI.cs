@@ -60,6 +60,11 @@ public class EnemyAI : MonoBehaviour
     [Tooltip("Chance to attack even while prioritizing parry")]
     [Range(0f, 1f)]
     [SerializeField] public float passiveAttackChance = 0.3f;
+    [Header("Front Kick Counter System")]
+    [Tooltip("How many successful parries before triggering front kick")]
+    [SerializeField] private int parriesBeforeFrontKick = 3; // You can set this to 3 or 4
+    private int currentFrontKickCounter = 0;
+    private readonly int frontKickTriggerHash = Animator.StringToHash("frontKick");
 
     void Awake()
     {
@@ -351,19 +356,34 @@ public class EnemyAI : MonoBehaviour
     }
     public void OnSuccessfulParry()
     {
-        if (isPrioritizingParry)
-        {
-            currentParryCount++;
-            Debug.Log($"<color=cyan>Parry #{currentParryCount} successful!</color>");
+        // Increment the front kick counter
+        currentFrontKickCounter++;
+        Debug.Log($"<color=cyan>Parry #{currentFrontKickCounter} successful!</color>");
 
-            if (currentParryCount >= successfulParriesRequired)
-            {
-                // Switch to combo priority
-                isPrioritizingParry = false;
-                currentParryCount = 0;
-                Debug.Log("<color=orange>SWITCHING TO COMBO PRIORITY MODE!</color>");
-            }
+        // Check if we've reached the threshold for front kick
+        if (currentFrontKickCounter >= parriesBeforeFrontKick)
+        {
+            Debug.Log("<color=orange>PARRY THRESHOLD REACHED! Triggering FRONT KICK!</color>");
+            StartCoroutine(FrontKickSequence());
+            currentFrontKickCounter = 0; // Reset counter
         }
+    }
+    private IEnumerator FrontKickSequence()
+    {
+        isLocked = true;
+
+        // Play front kick animation
+        animator.SetTrigger(frontKickTriggerHash);
+        Debug.Log("<color=yellow>Playing FRONT KICK animation!</color>");
+
+        // Wait for the kick animation to play (adjust timing to match your animation)
+        yield return new WaitForSeconds(0.5f);
+
+        isLocked = false;
+
+        // NOW trigger the counter-attack
+        Debug.Log("<color=red>Front kick complete! NOW triggering counter-attack!</color>");
+        ForceCounterAttack();
     }
     public void OnComboFinished()
     {

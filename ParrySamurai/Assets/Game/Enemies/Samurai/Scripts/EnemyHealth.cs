@@ -81,6 +81,7 @@ public class EnemyHealth : MonoBehaviour
     private bool hasTakenDamageThisCombo = false;
     public bool isDead { get; private set; } = false;
     private bool isPerformingCounterAttack = false;
+    private readonly int frontKickTriggerHash = Animator.StringToHash("frontKick");
     void Awake()
     {
         currentHealth = maxHealth;
@@ -164,7 +165,7 @@ public class EnemyHealth : MonoBehaviour
                 // ... (All your parry success logic is perfect) ...
                 CameraShakerHandler.Shake(CameraShakeParry);
                 if (parrySparksEffect != null) { Instantiate(parrySparksEffect, parrySparksSpawnPoint.position, Quaternion.identity); }
-                if (playerAttackManager != null && enemyAI != null) { playerAttackManager.OnMyAttackWasParried(enemyAI); }
+                
                 ZreyMovements playerMovement = FindObjectOfType<ZreyMovements>();
                 if (playerMovement != null) 
                 {
@@ -453,7 +454,32 @@ public class EnemyHealth : MonoBehaviour
             finisherPromptUI.SetActive(false);
         }
     }
+    public void DealFrontKickDamage()
+    {
+        // Find the player
+        ZreyMovements playerMovement = FindObjectOfType<ZreyMovements>();
+        PlayerHealth playerHealth = FindObjectOfType<PlayerHealth>();
 
+        if (playerMovement != null && playerHealth != null)
+        {
+            Debug.Log("<color=orange>FRONT KICK HIT! Knocking back player!</color>");
+
+            // Apply knockback to player
+            float kickKnockbackDistance = 3f; // Adjust this value
+            float kickKnockbackDuration = 0.3f; // Adjust this value
+            playerMovement.ApplyKnockback(this.transform, kickKnockbackDistance, kickKnockbackDuration);
+
+            // Play player's knockback animation
+            Animator playerAnimator = playerMovement.GetComponent<Animator>();
+            if (playerAnimator != null)
+            {
+                playerAnimator.SetTrigger("KnockBack"); // Or create a new "Knockback" trigger
+            }
+
+            // Optional: Deal small damage
+            // playerHealth.TakeDamage(10, null);
+        }
+    }
     /// <summary>
     /// This is called by the player to officially kill the enemy after the finisher animation.
     /// </summary>

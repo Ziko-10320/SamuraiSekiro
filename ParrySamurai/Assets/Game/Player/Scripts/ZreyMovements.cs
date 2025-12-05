@@ -73,12 +73,14 @@ public class ZreyMovements : MonoBehaviour
     private PlayerHealth playerHealth;
     private bool isBeingKnockedBack = false;
     [SerializeField] private AnimationCurve knockbackCurve;
+    private AttackManager attackManager;
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
         animator = GetComponent<Animator>();
         rb.bodyType = RigidbodyType2D.Dynamic;
         playerHealth = GetComponent<PlayerHealth>();
+        attackManager = GetComponent<AttackManager>();
     }
 
     void OnAnimatorMove()
@@ -238,6 +240,18 @@ public class ZreyMovements : MonoBehaviour
 
     private void FlipCharacter()
     {
+        // DON'T flip if attacking (check AttackManager), being knocked back, or dashing
+        if (isBeingKnockedBack || currentState == MovementState.Dashing)
+        {
+            return;
+        }
+
+        // Check if AttackManager says we're attacking
+        if (attackManager != null && attackManager.IsAttacking())
+        {
+            return;
+        }
+
         // This logic is now simple and runs every frame, making it foolproof.
         if (!isCombatMode) // Only flip based on input in Walk Mode
         {
@@ -254,10 +268,9 @@ public class ZreyMovements : MonoBehaviour
         }
         if (SmokeEffect != null)
         {
-           SmokeEffect.transform.localScale = new Vector3(isFacingRight ? 1 : -1, 1, 1);
+            SmokeEffect.transform.localScale = new Vector3(isFacingRight ? 1 : -1, 1, 1);
         }
     }
-
     private void Jump()
     {
         // To jump with a kinematic Rigidbody, we need to temporarily make it dynamic.
