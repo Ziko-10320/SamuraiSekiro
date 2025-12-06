@@ -110,7 +110,7 @@ ScriptedImporter:
       y: 4
       width: 1536
       height: 672
-    spriteID: 978c5a5d7b05867419170bb537853c9c
+    spriteID: 0734b798174b9144a8d26b427c3b07f9
     spriteBone: []
     spriteOutline: []
     vertices: []
@@ -120,7 +120,7 @@ ScriptedImporter:
     tessellationDetail: 0
     uvTransform: {x: 4, y: 4}
     spritePosition: {x: 0, y: 0}
-  - name: Gemini_Generated_Image_cml1rtcml1rtcml1.png
+  - name: Gemini_Generated_Image_wlzc6ywlzc6ywlzc.png copy
     originalName: 
     pivot: {x: 0.5, y: 0.5}
     alignment: 0
@@ -131,7 +131,7 @@ ScriptedImporter:
       y: 684
       width: 1536
       height: 672
-    spriteID: 312fa5e176d5bd447b30a49cd49f1776
+    spriteID: 41abfb0aa42553e41a0f42c46300946c
     spriteBone: []
     spriteOutline: []
     vertices: []
@@ -181,18 +181,18 @@ ScriptedImporter:
     spriteName: Gemini_Generated_Image_wlzc6ywlzc6ywlzc.png
     isGroup: 0
     parentIndex: -1
-    spriteID: 978c5a5d7b05867419170bb537853c9c
-    layerID: 0
+    spriteID: 0734b798174b9144a8d26b427c3b07f9
+    layerID: 2
     mosaicPosition: {x: 4, y: 4}
     flatten: 0
     isImported: 1
     isVisible: 1
-  - name: Gemini_Generated_Image_cml1rtcml1rtcml1.png
-    spriteName: Gemini_Generated_Image_cml1rtcml1rtcml1.png
+  - name: Gemini_Generated_Image_wlzc6ywlzc6ywlzc.png copy
+    spriteName: Gemini_Generated_Image_wlzc6ywlzc6ywlzc.png copy
     isGroup: 0
     parentIndex: -1
-    spriteID: 312fa5e176d5bd447b30a49cd49f1776
-    layerID: 1313630728
+    spriteID: 41abfb0aa42553e41a0f42c46300946c
+    layerID: 3
     mosaicPosition: {x: 4, y: 684}
     flatten: 0
     isImported: 1
