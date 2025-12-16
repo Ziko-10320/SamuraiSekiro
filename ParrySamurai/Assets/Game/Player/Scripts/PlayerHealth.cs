@@ -20,6 +20,8 @@ public class PlayerHealth : MonoBehaviour
     private readonly int takeDamageTriggerHash = Animator.StringToHash("takeDamage"); // Optional: for a hurt animation
     private readonly int deathTriggerHash = Animator.StringToHash("death"); // Optional: for a death animation
     private readonly int parryTriggerHash = Animator.StringToHash("parry");
+    private readonly int parry2TriggerHash = Animator.StringToHash("parry2"); // ADD THIS LINE
+    private bool useAlternateParry = false;
     private readonly int getParriedTriggerHash = Animator.StringToHash("GetParried");
     // --- Public property to let other scripts read the health ---
     public int CurrentHealth => currentHealth;
@@ -64,6 +66,15 @@ public class PlayerHealth : MonoBehaviour
     [SerializeField] private float guardBreakKnockbackDistance = 3f;
     [SerializeField] private float guardBreakKnockbackDuration = 0.3f;
     private readonly int heavyTakeDamageTriggerHash = Animator.StringToHash("HeavyTakeDamage");
+    private bool isDodgeWindowActive = false;
+    private string currentEnemyAttackType = "";
+    private bool isDodgeActive = false;
+    [Header("Sound Effects")]
+    [SerializeField] private AudioSource audioSource;  // Audio source for playing sounds
+    [SerializeField] private AudioClip[] parrySounds = new AudioClip[3];  // 3 parry sounds
+    [SerializeField] private AudioClip blockHitSound;  // Sound when blocking and getting hit
+    [SerializeField] private AudioClip[] enemyParrySounds = new AudioClip[2];  // 2 enemy parry sounds
+    [SerializeField] private AudioClip[] playerHitSounds = new AudioClip[3];
     void Awake()
     {
        
@@ -146,8 +157,15 @@ public class PlayerHealth : MonoBehaviour
     /// <summary>
     /// This is the public method that enemies will call to deal damage.
     /// </summary>
-    public void TakeDamage(int damageAmount, EnemyHealth attackingEnemy = null, SlashProjectile sourceProjectile = null) // Added optional enemy parameter
+    public void TakeDamage(int damageAmount, EnemyHealth attackingEnemy = null, SlashProjectile sourceProjectile = null)
     {
+        // NEW: Check if player is currently dodging (immune)
+        if (isDodgeActive)
+        {
+            Debug.Log("<color=green>DODGE IMMUNITY! Damage blocked!</color>");
+            return; // Exit immediately, take NO damage
+        }
+
         if (attackManager != null && attackManager.IsPerformingFinisher())
         {
             // If yes, do nothing. The player is invincible.
@@ -159,6 +177,8 @@ public class PlayerHealth : MonoBehaviour
         {
             CameraShakerHandler.Shake(CameraShakeParry);
             Debug.Log("PARRY SUCCESSFUL!");
+            PlayRandomSound(parrySounds);
+
             if (attackingEnemy != null)
             {
                 // 2. ASK the enemy if it is in its special combo.
@@ -191,19 +211,27 @@ public class PlayerHealth : MonoBehaviour
                 // This is a failsafe log.
                 Debug.LogWarning("Player parried, but the source of the attack is unknown. Cannot stun enemy.");
             }
-            animator.SetTrigger(parryTriggerHash);
-           
+
+            // ALTERNATE BETWEEN TWO PARRY ANIMATIONS
+            if (useAlternateParry)
+            {
+                animator.SetTrigger(parry2TriggerHash);
+                Debug.Log("<color=cyan>Playing PARRY 2 animation!</color>");
+            }
+            else
+            {
+                animator.SetTrigger(parryTriggerHash);
+                Debug.Log("<color=cyan>Playing PARRY 1 animation!</color>");
+            }
+            useAlternateParry = !useAlternateParry; // Toggle for next parry
+
             // 1. Don't take any damage.
             // 2. Play the parry sparks effect.
             if (parrySparksEffect != null && parrySparksSpawnPoint != null)
             {
                 Instantiate(parrySparksEffect, parrySparksSpawnPoint.position, parrySparksSpawnPoint.rotation);
             }
-          
-            
-            // 4. Trigger slow motion.
-            StartCoroutine(SlowMoEffect());
-            // 5. Stop the function here.
+
             return;
         }
         if (attackManager != null)
@@ -221,18 +249,14 @@ public class PlayerHealth : MonoBehaviour
             // --- END OF FINAL, GUARANTEED FIX ---
         }
         // --- Trigger Knockback ---
-        // We only trigger knockback if an enemy is passed in.
-        if (attackingEnemy != null && playerMovement != null)
-        {
-            // We can reuse the GetParried knockback from ZreyMovements, but we need to make it public.
-            // Or, even better, let's make a new, more generic one.
-            playerMovement.ApplyKnockback(attackingEnemy.transform, knockbackDistance, knockbackDuration);
-        }
+      
         // --- BLOCK LOGIC ---
         // If the player is blocking (but not parrying)...
         if (isBlocking)
         {
             CameraShakerHandler.Shake(CameraShakeParry);
+            PlaySound(blockHitSound);
+
             if (blockSparksEffect != null && blockSparksSpawnPoint != null)
             {
                 Instantiate(blockSparksEffect, blockSparksSpawnPoint.position, blockSparksSpawnPoint.rotation);
@@ -241,17 +265,20 @@ public class PlayerHealth : MonoBehaviour
             int reducedDamage = Mathf.RoundToInt(damageAmount * (1 - blockDamageReduction));
             currentHealth -= reducedDamage;
             Debug.Log($"Attack BLOCKED! Player took {reducedDamage} reduced damage.");
-            if (attackingEnemy != null && playerMovement != null)
-            {
-                playerMovement.GetParried(attackingEnemy.transform);
-            }
+           
         }
        
         // --- NORMAL DAMAGE LOGIC ---
         else
         {
             currentHealth -= damageAmount;
+            PlayRandomSound(playerHitSounds);
             Debug.Log($"Player took {damageAmount} damage. Current Health: {currentHealth}");
+            if (attackingEnemy != null && playerMovement != null)
+            {
+                playerMovement.ApplyKnockback(attackingEnemy.transform, 1.5f, 0.2f);
+            }
+
             animator.SetTrigger(takeDamageTriggerHash);
         }
 
@@ -278,38 +305,33 @@ public class PlayerHealth : MonoBehaviour
     {
         if (isParryWindowActive)
         {
-            // 2. If YES, the parry is successful!
-            Debug.Log("<color=cyan>PLAYER PARRIED THE HEAVY ATTACK! No damage or knockback taken.</color>");
-            EnemyAI enemyAI = damageSource.GetComponent<EnemyAI>();
-            if (attackManager != null && enemyAI != null)
-            {
-                // 2. If it is, we initiate a CLASH, not a normal parry.
-                Debug.Log("<color=yellow>HEAVY PARRY SUCCESSFUL! INITIATING CLASH!</color>");
-                attackManager.StartClash(enemyAI);
+            // PARRIED! Just apply small knockback to both
+            Debug.Log("<color=cyan>PLAYER PARRIED THE HEAVY ATTACK! Both get knockback.</color>");
 
-                // 3. IMPORTANT: We STOP here. We do not run any of the normal parry logic below.
-                //    This prevents the 'parry' and 'GetParried' triggers from firing and breaking the animation.
-                return;
-            }
-            // We can still play the normal parry effects for feedback.
             CameraShakerHandler.Shake(CameraShakeParry);
-            animator.SetTrigger(parryTriggerHash); // Play the player's parry animation
+            animator.SetTrigger(parryTriggerHash);
+
             if (parrySparksEffect != null && parrySparksSpawnPoint != null)
             {
                 Instantiate(parrySparksEffect, parrySparksSpawnPoint.position, parrySparksSpawnPoint.rotation);
             }
-          
 
-            // 2. If we found it, tell the player's AttackManager to start the clash.
-            if (attackManager != null && enemyAI != null)
+            // Apply small knockback to BOTH player and enemy
+            if (playerMovement != null)
             {
-                attackManager.StartClash(enemyAI);
+                playerMovement.ApplyKnockback(damageSource, knockbackDist * 0.5f, knockbackDur); // Half knockback for player
             }
-            StartCoroutine(SlowMoEffect());
 
-            // 3. IMPORTANT: Stop the method here. Do not apply any damage or knockback.
+            EnemyAI enemyAI = damageSource.GetComponent<EnemyAI>();
+            if (enemyAI != null)
+            {
+                enemyAI.ApplyKnockback(transform, knockbackDist * 0.5f, knockbackDur); // Half knockback for enemy
+            }
+
+            
             return;
         }
+
         // Cancel any current player attack.
         if (attackManager != null)
         {
@@ -322,8 +344,8 @@ public class PlayerHealth : MonoBehaviour
 
         // Play the special heavy damage animation.
         animator.SetTrigger(animationTriggerHash);
-        StartCoroutine(HeavyKnockbackCoroutine(damageSource, knockbackDist, knockbackDur, 0.17f));
-        // Apply the huge knockback.
+
+        // Apply knockback to player
         if (playerMovement != null)
         {
             playerMovement.ApplyKnockback(damageSource, knockbackDist, knockbackDur);
@@ -354,7 +376,7 @@ public class PlayerHealth : MonoBehaviour
         Debug.Log("Parry window CLOSED.");
     }
 
-    private IEnumerator SlowMoEffect()
+    public IEnumerator SlowMoEffect()
     {
         Time.timeScale = parryTimeScale;
         // We use unscaledDeltaTime because the game time is now slowed down.
@@ -366,7 +388,7 @@ public class PlayerHealth : MonoBehaviour
     {
         Debug.Log("Player has died!");
         animator.SetTrigger(deathTriggerHash);
-
+        Destroy(gameObject); // Delay to allow death animation to play.
         // Disable all player control scripts.
         GetComponent<ZreyMovements>().enabled = false;
         GetComponent<AttackManager>().enabled = false;
@@ -407,5 +429,94 @@ public class PlayerHealth : MonoBehaviour
     public bool IsCurrentlyBlocking()
     {
         return isBlocking;
+    }
+    public void CameraShake()
+    {
+        CameraShakerHandler.Shake(CameraShakeParry);
+    }
+    public void OpenDodgeWindow(string attackType)
+    {
+        isDodgeWindowActive = true;
+        currentEnemyAttackType = attackType;
+
+        // NEW: Reset the dodge input flag so player can dodge this new attack
+        ZreyMovements playerMovement = GetComponent<ZreyMovements>();
+        if (playerMovement != null)
+        {
+            playerMovement.ResetDodgeInput();  // Call new public method
+        }
+
+        Debug.Log($"<color=green>Dodge window OPEN for: {attackType}</color>");
+    }
+    public void CloseDodgeWindow()
+    {
+        isDodgeWindowActive = false;
+        currentEnemyAttackType = "";
+        Debug.Log("<color=red>Dodge window CLOSED</color>");
+    }
+
+    public bool IsDodgeWindowActive()
+    {
+        return isDodgeWindowActive;
+    }
+
+    public string GetCurrentEnemyAttackType()
+    {
+        return currentEnemyAttackType;
+    }
+
+    // ADD THIS FOR IMMUNITY:
+    public bool IsDodgeActive()
+    {
+        return isDodgeActive;
+    }
+
+    public void SetDodgeActive(bool active)
+    {
+        isDodgeActive = active;
+    }
+    public void StartDodgeImmunity()
+    {
+        isDodgeActive = true;
+        Debug.Log("<color=green>DODGE IMMUNITY STARTED (via animation event)</color>");
+    }
+
+    // NEW: Called by animation event at END of dodge animation
+    public void StopDodgeImmunity()
+    {
+        isDodgeActive = false;
+        Debug.Log("<color=red>DODGE IMMUNITY ENDED (via animation event)</color>");
+    }
+    // NEW: Play a random sound from an array
+    private void PlayRandomSound(AudioClip[] soundArray)
+    {
+        if (audioSource == null || soundArray == null || soundArray.Length == 0)
+        {
+            Debug.LogWarning("AudioSource or sound array is not assigned!");
+            return;
+        }
+
+        // Pick a random sound from the array
+        int randomIndex = Random.Range(0, soundArray.Length);
+        AudioClip selectedSound = soundArray[randomIndex];
+
+        if (selectedSound != null)
+        {
+            audioSource.PlayOneShot(selectedSound);
+            Debug.Log($"<color=cyan>Playing sound: {selectedSound.name}</color>");
+        }
+    }
+
+    // NEW: Play a single sound
+    private void PlaySound(AudioClip sound)
+    {
+        if (audioSource == null || sound == null)
+        {
+            Debug.LogWarning("AudioSource or sound is not assigned!");
+            return;
+        }
+
+        audioSource.PlayOneShot(sound);
+        Debug.Log($"<color=cyan>Playing sound: {sound.name}</color>");
     }
 }

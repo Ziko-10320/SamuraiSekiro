@@ -65,6 +65,13 @@ public class EnemyAI : MonoBehaviour
     [SerializeField] private int parriesBeforeFrontKick = 3; // You can set this to 3 or 4
     private int currentFrontKickCounter = 0;
     private readonly int frontKickTriggerHash = Animator.StringToHash("frontKick");
+    [Header("Random Front Kick System")]
+    [Tooltip("Chance to randomly trigger front kick when idle (0-1)")]
+    [Range(0f, 1f)]
+    [SerializeField] private float randomFrontKickChance = 0.15f; // 15% chance
+    [Tooltip("Cooldown between random front kicks")]
+    [SerializeField] private float randomFrontKickCooldown = 8f;
+    private float lastRandomFrontKickTime = -999f;
 
     void Awake()
     {
@@ -77,11 +84,11 @@ public class EnemyAI : MonoBehaviour
 
     void Update()
     {
-        if (healthScript != null && healthScript.isDead)
+        if (healthScript != null && (healthScript.isDead || healthScript.IsFinishable()))
         {
-            // If dead, do ABSOLUTELY NOTHING. Stop the entire AI loop.
             return;
         }
+
         if (isLocked || isClashing || (healthScript != null && healthScript.IsStunned()))
         {
             return;
@@ -90,7 +97,6 @@ public class EnemyAI : MonoBehaviour
         {
             return;
         }
-        // The brain does not think if it's locked or stunned.
         if (isLocked || (healthScript != null && healthScript.IsStunned()))
         {
             return;
@@ -107,21 +113,37 @@ public class EnemyAI : MonoBehaviour
 
         float distanceToPlayer = Vector2.Distance(transform.position, attackScript.GetPlayerTarget().position);
 
+        // --- NEW: Random front kick chance when idle ---
+        if (!isLocked && !attackScript.CanAttack() && Time.time - lastRandomFrontKickTime > randomFrontKickCooldown)
+        {
+            float roll = Random.Range(0f, 1f);
+            if (roll <= randomFrontKickChance)
+            {
+                // Check if player is in range
+                if (distanceToPlayer <= attackScript.GetAttackRange())
+                {
+                    Debug.Log("<color=magenta>RANDOM FRONT KICK TRIGGERED!</color>");
+                    lastRandomFrontKickTime = Time.time;
+                    StartCoroutine(FrontKickSequence());
+                    return;
+                }
+            }
+        }
+
         // --- THE NEW, SMARTER DECISION LOGIC ---
 
         // Decision 1: Player is too close AND cooldown is ready. Dash away.
-        // This is the HIGHEST priority decision.
         if (distanceToPlayer < defensiveDashDistance && dashCooldownTimer <= 0)
         {
             StartCoroutine(DefensiveDashSequence());
-            return; // IMPORTANT: If we decide to dash, we don't evaluate any other actions this frame.
+            return;
         }
 
         // Decision 2: Player is too far AND ranged attack is ready.
         if (distanceToPlayer > rangedAttackDistance && canThrow)
         {
             StartCoroutine(RangedAttackSequence());
-            return; // Stop here to not conflict with melee.
+            return;
         }
 
         // Decision 3: (Implicit) If neither of the above, the EnemyAttack script will handle melee.
@@ -192,26 +214,38 @@ public class EnemyAI : MonoBehaviour
     {
         if (!isReadyToParry) return;
 
-        // Increase parry chance when prioritizing parry
-        float effectiveParryChance = isPrioritizingParry ? 0.9f : parryChance;
-
-        float roll = Random.Range(0f, 1f);
-        if (roll <= effectiveParryChance)
+        // In parry priority mode: ALWAYS PARRY (100%)
+        if (isPrioritizingParry)
         {
-            Debug.Log("<color=cyan>ENEMY AI: Decision is PARRY. Forcing state now.</color>");
-
+            Debug.Log("<color=cyan>ENEMY AI: PARRYING! (Parry Priority Mode - 100% chance)</color>");
             if (healthScript != null)
             {
                 healthScript.StartParryState();
             }
-
             animator.SetTrigger(parryTriggerHash);
+        }
+        else
+        {
+            // In combo mode: attack aggressively, rarely parry
+            float roll = Random.Range(0f, 1f);
+            if (roll <= 0.2f) // Only 20% chance to parry in combo mode
+            {
+                Debug.Log("<color=cyan>ENEMY AI: Decision is PARRY (Combo Priority Mode).</color>");
+                if (healthScript != null)
+                {
+                    healthScript.StartParryState();
+                }
+                animator.SetTrigger(parryTriggerHash);
+            }
+            else
+            {
+                Debug.Log("<color=yellow>ENEMY AI: Attacking in combo mode.</color>");
+                // Don't parry, let the attack script handle it
+            }
         }
 
         isReadyToParry = false;
     }
-
-
     public void SpawnSlashProjectile()
     {
         if (slashProjectilePrefab == null || projectileSpawnPoint == null || attackScript.GetPlayerTarget() == null || followScript == null)
@@ -258,7 +292,9 @@ public class EnemyAI : MonoBehaviour
 
     private IEnumerator CounterAttackSequence()
     {
-        // --- The warning glint logic is perfect ---
+        isLocked = true; // Lock the AI during counter
+
+        // --- The warning glint logic ---
         if (counterWarningGlint != null)
         {
             counterWarningGlint.gameObject.SetActive(true);
@@ -276,26 +312,48 @@ public class EnemyAI : MonoBehaviour
         }
         animator.SetTrigger(counterAttackTriggerHash);
 
-        // --- The logic to disable the glint is also perfect ---
+        // Wait for counter-attack animation to finish
+        yield return new WaitForSeconds(1.5f); // Adjust to match your counter animation length
+
+        // --- The logic to disable the glint ---
         if (counterWarningGlint != null)
         {
-            yield return new WaitForSeconds(1f);
             counterWarningGlint.gameObject.SetActive(false);
         }
+
+        // CRITICAL: Reset the counter-attack state
+        if (healthScript != null)
+        {
+            healthScript.EndCounterAttackState();
+        }
+
+        isLocked = false; // Unlock the AI so it can act again
+        Debug.Log("<color=green>Counter-attack sequence complete. AI unlocked.</color>");
     }
     public void PrepareForPlayerAttack()
     {
         // This is called by the player's animation event.
         // It just flips a switch to say "I'm ready."
-        isReadyToParry = true;
+
         if (healthScript != null && healthScript.IsStunned())
         {
             Debug.Log("<color=red>ENEMY AI: Aborting PrepareForAttack because I am stunned!</color>");
             return;
         }
-        // Start a coroutine to automatically turn the switch off after a moment.
-        // This prevents the enemy from being "ready" forever.
-        StartCoroutine(ParryReadinessWindow());
+
+        // In parry priority mode, ALWAYS be ready to parry
+        if (isPrioritizingParry)
+        {
+            isReadyToParry = true;
+            Debug.Log("<color=green>ENEMY AI: READY TO PARRY (Parry Priority Mode)!</color>");
+            // Don't start a timer - keep ready until the attack comes
+        }
+        else
+        {
+            // In combo mode, use the normal readiness window
+            isReadyToParry = true;
+            StartCoroutine(ParryReadinessWindow());
+        }
     }
 
     private IEnumerator ParryReadinessWindow()
@@ -303,7 +361,12 @@ public class EnemyAI : MonoBehaviour
         // Wait for a short time (e.g., half a second). This is the window
         // during which the enemy is actively looking for a parry.
         yield return new WaitForSeconds(0.5f);
-        isReadyToParry = false;
+
+        // Only close the window if we're NOT in parry priority mode
+        if (!isPrioritizingParry)
+        {
+            isReadyToParry = false;
+        }
     }
     public void ApplyKnockback(Transform source, float distance, float duration)
     {
@@ -363,20 +426,71 @@ public class EnemyAI : MonoBehaviour
         // Check if we've reached the threshold for front kick
         if (currentFrontKickCounter >= parriesBeforeFrontKick)
         {
-            Debug.Log("<color=orange>PARRY THRESHOLD REACHED! Triggering FRONT KICK!</color>");
-            StartCoroutine(FrontKickSequence());
-            currentFrontKickCounter = 0; // Reset counter
+            Debug.Log("<color=orange>PARRY THRESHOLD REACHED! Checking if player is in range...</color>");
+
+            // ONLY trigger front kick if player is in range
+            if (attackScript != null && attackScript.GetPlayerTarget() != null)
+            {
+                float distanceToPlayer = Vector2.Distance(transform.position, attackScript.GetPlayerTarget().position);
+
+                if (distanceToPlayer <= attackScript.GetAttackRange())
+                {
+                    Debug.Log("<color=orange>Player is in range! Triggering FRONT KICK!</color>");
+                    StartCoroutine(FrontKickSequence());
+                    currentFrontKickCounter = 0; // Reset counter
+                    isPrioritizingParry = false; // Switch to combo mode
+                    lastRandomFrontKickTime = Time.time; // Reset cooldown
+                }
+                else
+                {
+                    Debug.Log("<color=red>Player is OUT OF RANGE! Front kick cancelled!</color>");
+                    currentFrontKickCounter = 0; // Reset counter anyway
+                }
+            }
+        }
+        // ADD THIS: Random chance to front kick even without reaching threshold
+        else
+        {
+            float roll = Random.Range(0f, 1f);
+            if (roll <= randomFrontKickChance * 0.5f) // Half chance compared to idle
+            {
+                if (attackScript != null && attackScript.GetPlayerTarget() != null)
+                {
+                    float distanceToPlayer = Vector2.Distance(transform.position, attackScript.GetPlayerTarget().position);
+                    if (distanceToPlayer <= attackScript.GetAttackRange())
+                    {
+                        Debug.Log("<color=magenta>RANDOM FRONT KICK AFTER PARRY!</color>");
+                        StartCoroutine(FrontKickSequence());
+                        currentFrontKickCounter = 0;
+                        isPrioritizingParry = false;
+                        lastRandomFrontKickTime = Time.time;
+                    }
+                }
+            }
         }
     }
     private IEnumerator FrontKickSequence()
     {
         isLocked = true;
 
+        // Double-check player is still in range before kicking
+        if (attackScript != null && attackScript.GetPlayerTarget() != null)
+        {
+            float distanceToPlayer = Vector2.Distance(transform.position, attackScript.GetPlayerTarget().position);
+
+            if (distanceToPlayer > attackScript.GetAttackRange())
+            {
+                Debug.Log("<color=red>Player moved out of range! Cancelling front kick!</color>");
+                isLocked = false;
+                yield break; // CHANGE: Use 'yield break' instead of 'return'
+            }
+        }
+
         // Play front kick animation
         animator.SetTrigger(frontKickTriggerHash);
         Debug.Log("<color=yellow>Playing FRONT KICK animation!</color>");
 
-        // Wait for the kick animation to play (adjust timing to match your animation)
+        // Wait for the kick animation to play
         yield return new WaitForSeconds(0.5f);
 
         isLocked = false;

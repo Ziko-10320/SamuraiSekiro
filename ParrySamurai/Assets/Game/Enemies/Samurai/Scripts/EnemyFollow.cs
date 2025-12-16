@@ -47,6 +47,7 @@ public class EnemyFollow : MonoBehaviour
     [SerializeField] private float dashSpeed = 10f;
     [SerializeField] private float dashDuration = 0.4f;
     private bool isDashing = false;
+    private bool shouldCancelLunge = false;
 
     void Awake()
     {
@@ -77,6 +78,14 @@ public class EnemyFollow : MonoBehaviour
         }
         if (isLunging)
         {
+            // Check if lunge should be cancelled
+            if (shouldCancelLunge)
+            {
+                isLunging = false;
+                shouldCancelLunge = false;
+                return;
+            }
+
             lungeTimer -= Time.deltaTime;
             if (lungeTimer <= 0)
             {
@@ -213,13 +222,31 @@ public class EnemyFollow : MonoBehaviour
     }
     public void PerformLunge()
     {
-        // We don't need a coroutine here, we can use the existing 'isLunging' state.
+        // Stop any current movement
+        canMove = false;
+        rb.velocity = new Vector2(0, rb.velocity.y);
+
+        // Start the lunge
         isLunging = true;
+        shouldCancelLunge = false; // Reset the cancel flag
         lungeTimer = lungeDuration;
 
         // Determine lunge direction based on where the enemy is facing.
         lungeDirection = isFacingRight ? Vector2.right : Vector2.left;
+
+        Debug.Log($"<color=yellow>LUNGE STARTED! Direction: {lungeDirection}</color>");
     }
+
+    // ADD THIS NEW METHOD:
+    public void CancelLunge()
+    {
+        shouldCancelLunge = true;
+        isLunging = false;
+        lungeTimer = 0f; // ADD THIS LINE
+        rb.velocity = Vector2.zero; // MAKE SURE THIS RUNS
+        Debug.Log("<color=red>LUNGE CANCELLED!</color>");
+    }
+
     public bool IsFacingRight()
     {
         return isFacingRight;

@@ -59,8 +59,32 @@ public class EnemyAttack : MonoBehaviour
     private readonly int heavyTakeDamageTriggerHash = Animator.StringToHash("HeavyTakeDamage");
     private bool isHeavyDamageFrameActive = false;
     private bool hasDealtHeavyDamageThisAttack = false;
+    [Header("Light Combo Settings")]
+    [SerializeField] private int lightAttackDamage = 15;
+    [Range(0f, 1f)]
+    [SerializeField] private float lightComboChance = 0.6f; // 60% chance for light combo
 
+    [Header("Heavy Combo Settings")]
+    [SerializeField] private int heavyComboAttackDamage = 20;
+    [Range(0f, 1f)]
+    [SerializeField] private float heavyComboChance = 0.4f; // 40% chance for heavy combo
 
+    // Animation hashes for light attacks
+    private readonly int lightAttack1TriggerHash = Animator.StringToHash("lightAttack1");
+    private readonly int lightAttack2TriggerHash = Animator.StringToHash("lightAttack2");
+    private readonly int lightAttack3TriggerHash = Animator.StringToHash("lightAttack3");
+
+    private bool isLightCombo = false;
+
+    private Coroutine comboTimeoutCoroutine;
+    [SerializeField] private float comboTimeoutDuration = 6f;
+    private string currentAttackType = "";
+    [SerializeField] private AudioSource audioSource;  // Audio source for enemy sounds
+    [SerializeField] private AudioClip kickSound;
+   
+    [SerializeField] private AudioClip lightAttackSound1;  // Light attack 1 sound
+    [SerializeField] private AudioClip lightAttackSound2;  // Light attack 2 sound
+    [SerializeField] private AudioClip lightAttackSound3;
     void Awake()
     {
         animator = GetComponent<Animator>();
@@ -90,6 +114,10 @@ public class EnemyAttack : MonoBehaviour
 
     void Update()
     {
+        if (healthScript != null && (healthScript.isDead || healthScript.IsFinishable()))
+        {
+            return;
+        }
         if (isPerformingCombo)
         {
             return;
@@ -134,7 +162,19 @@ public class EnemyAttack : MonoBehaviour
     {
         if (!canAttack) return;
 
-        Debug.Log("<color=orange>--- ENEMY COMBO STARTED ---</color>");
+        // Decide between light and heavy combo
+        float roll = Random.Range(0f, 1f);
+        isLightCombo = roll <= lightComboChance;
+
+        if (isLightCombo)
+        {
+            Debug.Log("<color=yellow>--- LIGHT COMBO STARTED ---</color>");
+        }
+        else
+        {
+            Debug.Log("<color=orange>--- HEAVY COMBO STARTED ---</color>");
+        }
+
         canAttack = false;
         isPerformingCombo = true;
         comboStep = 1;
@@ -144,24 +184,59 @@ public class EnemyAttack : MonoBehaviour
         {
             healthScript.ActivateComboArmor();
         }
-
-        // Trigger the first attack animation.
-        animator.SetTrigger(attackTriggerHash);
+        if (comboTimeoutCoroutine != null)
+        {
+            StopCoroutine(comboTimeoutCoroutine);
+        }
+        comboTimeoutCoroutine = StartCoroutine(ComboTimeoutCoroutine());
+        // Trigger the first attack animation based on combo type
+        if (isLightCombo)
+        {
+            animator.SetTrigger(lightAttack1TriggerHash);
+        }
+        else
+        {
+            animator.SetTrigger(attackTriggerHash);
+        }
     }
+    private IEnumerator ComboTimeoutCoroutine()
+    {
+        yield return new WaitForSeconds(comboTimeoutDuration);
 
+        // If combo is still active after timeout, force finish it
+        if (isPerformingCombo)
+        {
+            Debug.Log("<color=red>COMBO TIMEOUT! Force finishing combo!</color>");
+            FinishCombo();
+        }
+    }
     // --- THIS NEW METHOD IS CALLED BY ANIMATION EVENTS ---
     public void TriggerNextComboAttack()
     {
         comboStep++;
-        if (comboStep == 2)
+
+        if (isLightCombo)
         {
-            animator.SetTrigger(attack2TriggerHash);
+            if (comboStep == 2)
+            {
+                animator.SetTrigger(lightAttack2TriggerHash);
+            }
+            else if (comboStep == 3)
+            {
+                animator.SetTrigger(lightAttack3TriggerHash);
+            }
         }
-        else if (comboStep == 3)
+        else
         {
-            animator.SetTrigger(attack3TriggerHash);
+            if (comboStep == 2)
+            {
+                animator.SetTrigger(attack2TriggerHash);
+            }
+            else if (comboStep == 3)
+            {
+                animator.SetTrigger(attack3TriggerHash);
+            }
         }
-        // If comboStep > 3, it means the combo is over.
     }
 
     // --- THIS NEW METHOD IS CALLED BY AN ANIMATION EVENT AT THE END OF THE LAST ATTACK ---
@@ -170,20 +245,29 @@ public class EnemyAttack : MonoBehaviour
         Debug.Log("<color=green>--- ENEMY COMBO FINISHED ---</color>");
         isPerformingCombo = false;
         comboStep = 0;
+        isLightCombo = false;
+
+        // Stop the timeout coroutine
+        if (comboTimeoutCoroutine != null)
+        {
+            StopCoroutine(comboTimeoutCoroutine);
+            comboTimeoutCoroutine = null;
+        }
 
         // Tell the health script to deactivate the damage shield.
         if (healthScript != null)
         {
             healthScript.DeactivateComboArmor();
         }
+
         if (enemyAi != null)
         {
             enemyAi.OnComboFinished();
         }
+
         // Start the master cooldown timer.
         StartCoroutine(AttackCooldownCoroutine());
     }
-
     // --- THIS NEW METHOD IS CALLED BY AN ANIMATION EVENT ON THE 3RD ATTACK ---
     public void TriggerHeavyKnockback()
     {
@@ -256,10 +340,7 @@ public class EnemyAttack : MonoBehaviour
     }
     private void CheckForPlayerDamage()
     {
-        if (isPerformingRangedAttack)
-        {
-            return;
-        }
+        if (isPerformingRangedAttack) return;
         if (hasDealtDamageThisAttack) return;
 
         Collider2D playerHit = Physics2D.OverlapBox(damagePoint.position, damageAreaSize, 0f, playerLayer);
@@ -269,24 +350,32 @@ public class EnemyAttack : MonoBehaviour
             PlayerHealth playerHealth = playerHit.GetComponent<PlayerHealth>();
             if (playerHealth != null)
             {
-                // --- THIS IS THE FINAL FIX ---
-                // 1. Get the EnemyHealth component from this same GameObject.
-                EnemyHealth myHealthScript = GetComponent<EnemyHealth>();
+                // CHECK IF PLAYER SUCCESSFULLY DODGED
+                if (playerHealth.IsDodgeActive())
+                {
+                    Debug.Log("<color=green>DODGE SUCCESSFUL! No damage taken!</color>");
+                    hasDealtDamageThisAttack = true;
+                    return; // Don't deal damage
+                }
 
-                // 2. Pass that specific component to the TakeDamage method.
-                playerHealth.TakeDamage(attackDamage, myHealthScript);
-                // --- END OF FIX ---
+                // Normal damage logic
+                int damageToApply = isLightCombo ? lightAttackDamage : heavyComboAttackDamage;
+
+                if (!isLightCombo && comboStep == 3)
+                {
+                    Debug.Log("<color=red>HEAVY ATTACK 3 - APPLYING MASSIVE KNOCKBACK!</color>");
+                    playerHealth.TakeHeavyDamage(damageToApply, transform, heavyKnockbackDistance, heavyKnockbackDuration, heavyTakeDamageTriggerHash);
+                }
+                else
+                {
+                    EnemyHealth myHealthScript = GetComponent<EnemyHealth>();
+                    playerHealth.TakeDamage(damageToApply, myHealthScript);
+                }
 
                 hasDealtDamageThisAttack = true;
             }
         }
     }
-
-    // --- NEW ANIMATION EVENT METHODS ---
-
-    /// <summary>
-    /// Called by an animation event to start the damage window.
-    /// </summary>
     public void StartDamageDetection()
     {
         isDamageFrameActive = true;
@@ -300,8 +389,51 @@ public class EnemyAttack : MonoBehaviour
     {
         isDamageFrameActive = false;
     }
+    // --- NEW ANIMATION EVENT METHODS ---
 
-  
+    /// <summary>
+    /// Called by an animation event to start the damage window.
+    /// </summary>
+    public void StartdodgeDetection()
+    {
+        // TRACK ATTACK TYPE
+        if (isLightCombo)
+        {
+            currentAttackType = "lightAttack" + comboStep;
+        }
+        else
+        {
+            currentAttackType = "attack" + comboStep;
+        }
+
+        // ONLY OPEN DODGE WINDOW IF NOT ATTACK3
+        if (currentAttackType != "attack3")
+        {
+            PlayerHealth playerHealth = FindObjectOfType<PlayerHealth>();
+            if (playerHealth != null)
+            {
+                playerHealth.OpenDodgeWindow(currentAttackType);
+                Debug.Log($"<color=yellow>Dodge window opened for: {currentAttackType}</color>");
+            }
+        }
+
+        Debug.Log($"<color=yellow>Attack started: {currentAttackType}</color>");
+    }
+
+    public void StopdodgeDetection()
+    {
+        // CLOSE DODGE WINDOW
+        PlayerHealth playerHealth = FindObjectOfType<PlayerHealth>();
+        if (playerHealth != null)
+        {
+            playerHealth.CloseDodgeWindow();
+        }
+    }
+
+    public string GetCurrentAttackType()
+    {
+        return currentAttackType;
+    }
     private void PerformAttack()
     {
         // We can't attack if we are on cooldown.
@@ -368,6 +500,14 @@ public class EnemyAttack : MonoBehaviour
     { 
         return canAttack;
     }
+    public float GetAttackRange()
+    {
+        return attackRange;
+    }
+    public bool IsPerformingCombo()
+{
+    return isPerformingCombo;
+}
     // --- GIZMO FOR VISUALIZATION ---
     private void OnDrawGizmosSelected()
     {
@@ -382,5 +522,36 @@ public class EnemyAttack : MonoBehaviour
             Gizmos.color = Color.yellow;
             Gizmos.DrawWireCube(damagePoint.position, damageAreaSize);
         }
+    }
+    public void PlayKickSound()
+    {
+        if (audioSource == null || kickSound == null)
+        {
+            Debug.LogWarning("AudioSource or Kick Sound is not assigned!");
+            return;
+        }
+
+        audioSource.PlayOneShot(kickSound);
+        Debug.Log("<color=cyan>Playing kick sound!</color>");
+    }
+    public void PlayLightAttackSound1()
+    {
+        if (audioSource == null || lightAttackSound1 == null) return;
+        audioSource.PlayOneShot(lightAttackSound1);
+        Debug.Log("<color=cyan>Playing light attack sound 1!</color>");
+    }
+
+    public void PlayLightAttackSound2()
+    {
+        if (audioSource == null || lightAttackSound2 == null) return;
+        audioSource.PlayOneShot(lightAttackSound2);
+        Debug.Log("<color=cyan>Playing light attack sound 2!</color>");
+    }
+
+    public void PlayLightAttackSound3()
+    {
+        if (audioSource == null || lightAttackSound3 == null) return;
+        audioSource.PlayOneShot(lightAttackSound3);
+        Debug.Log("<color=cyan>Playing light attack sound 3!</color>");
     }
 }

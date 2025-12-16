@@ -40,7 +40,7 @@ public class AttackManager : MonoBehaviour
     private readonly int attack1TriggerHash = Animator.StringToHash("attack1");
     private readonly int attack2TriggerHash = Animator.StringToHash("attack2");
     private readonly int attack3TriggerHash = Animator.StringToHash("attack3");
-
+    private readonly int attack4TriggerHash = Animator.StringToHash("attack4");
     private Rigidbody2D rb;
 
     [Header("Damage Settings")]
@@ -120,6 +120,36 @@ public class AttackManager : MonoBehaviour
     [SerializeField] private float enemyRecoilOnWin = 1.5f;
     [Tooltip("How long the ENEMY's recoil lasts.")]
     [SerializeField] private float enemyRecoilDuration = 0.2f;
+    [Header("Attack 3 Heavy Knockback")]
+    [SerializeField] private float attack3KnockbackDistance = 2.5f; // Bigger than normal
+    [SerializeField] private float attack3KnockbackDuration = 0.25f;
+   
+    [SerializeField] private float chargeHoldTime = 0.5f; // Time to hold for full charge
+    [SerializeField] private int chargeAttackDamage = 50; // Damage when charged
+    [SerializeField] private float chargeStunDuration = 0.5f; // Stun duration
+    [SerializeField] private float chargeKnockbackDistance = 3f; // Knockback distance
+    [SerializeField] private float chargeKnockbackDuration = 0.3f; // Knockback duration
+    private float chargeTimer = 0f;
+    private bool isCharging = false;
+    private readonly int chargeAttackTriggerHash = Animator.StringToHash("chargeAttack");
+    [Header("Dash Attack Settings")]
+    [SerializeField] private int dashAttackDamage = 15;  // Less than normal attack damage
+    [SerializeField] private float dashAttackCooldown = 1.5f;  // Cooldown between dash attacks
+    [SerializeField] private Transform dashAttackStartEffectSpawnPoint;  // Where to spawn start particles
+    [SerializeField] private ParticleSystem dashAttackStartEffect;  // Particles at dash start position
+    [SerializeField] private Transform dashAttackImpactEffectSpawnPoint;  // Where to spawn impact particles
+    [SerializeField] private ParticleSystem dashAttackImpactEffect;  // Particles at teleport destination
+    [SerializeField] private float dashAttackTeleportOffsetY = 0.5f;  // How far above enemy to teleport
+    [SerializeField] private string dashAttackAnimationName = "dashAttack";  // Animation trigger name
+    private readonly int dashAttackTriggerHash = Animator.StringToHash("dashAttack");
+    private float lastDashAttackTime = 0f;  // Track cooldown
+    private bool isDashAttackActive = false;  // State flag
+    [Header("Sound Effects")]
+    [SerializeField] private AudioSource audioSource;  // Audio source for player sounds
+    [SerializeField] private AudioClip slashSound1;  // Slash 1 sound
+    [SerializeField] private AudioClip slashSound2;  // Slash 2 sound
+    [SerializeField] private AudioClip slashSound3;  // Slash 3 sound
+
     void Awake()
     {
         if (animator == null) animator = GetComponent<Animator>();
@@ -145,43 +175,263 @@ public class AttackManager : MonoBehaviour
             return;
         }
 
+        if (Input.GetMouseButtonDown(0) && playerMovement.IsDashing() && !isAttacking && !isDashAttackActive)
+        {
+            // Check if player is dashing FORWARD
+            if (playerMovement.IsDashingForward())
+            {
+                // Check cooldown
+                if (Time.time - lastDashAttackTime >= dashAttackCooldown)
+                {
+                    TryPerformDashAttack();
+                    return;  // Exit early to prevent normal attack
+                }
+            }
+        }
         // Reset combo if too much time has passed
         if (Time.time - lastAttackTime > comboResetTime && comboStep > 0)
         {
             comboStep = 0;
-            Debug.Log("Combo reset due to timeout");
         }
 
-        // SIMPLE: Only accept input when NOT attacking
-        if (Input.GetMouseButtonDown(0) && !isAttacking && playerMovement.IsGrounded() && !playerMovement.IsDashing())
+        // --- CHARGE ATTACK DETECTION (separate from normal attack) ---
+        if (Input.GetMouseButtonDown(0))
         {
-            if (TryPerformFinisher()) return;
-            if (playerHealth != null && playerHealth.isBlocking) return;
-
-            // Update the last attack time
-            lastAttackTime = Time.time;
-
-            // Increment combo step
-            comboStep++;
-            if (comboStep > 3)
+            // Check if we should start charging
+            if (!isAttacking && playerMovement.IsGrounded() && !playerMovement.IsDashing() && !isAttackDisabled)
             {
-                comboStep = 1; // Reset to first attack if exceeds 3
+                if (TryPerformFinisher()) return;
+                if (playerHealth != null && playerHealth.isBlocking) return;
+
+                // Start charging
+                isCharging = true;
+                chargeTimer = 0f;
+                Debug.Log("<color=yellow>CHARGE ATTACK STARTED!</color>");
+            }
+        }
+
+        // While holding mouse button - charge timer
+        if (Input.GetMouseButton(0) && isCharging && !isAttacking)
+        {
+            chargeTimer += Time.deltaTime;
+
+            // TRIGGER CHARGE ATTACK WHEN TIME IS REACHED
+            if (chargeTimer >= chargeHoldTime)
+            {
+                Debug.Log("<color=orange>CHARGE ATTACK FULLY CHARGED - TRIGGERING NOW!</color>");
+                PerformChargeAttack();
+                isCharging = false;
+                chargeTimer = 0f;
+            }
+        }
+
+        // Release mouse button - cancel charge if not fully charged
+        if (Input.GetMouseButtonUp(0) && isCharging && chargeTimer < chargeHoldTime)
+        {
+            // Charge was released before full charge - do normal attack instead
+            if (!isAttacking && playerMovement.IsGrounded() && !playerMovement.IsDashing() && !isAttackDisabled)
+            {
+                if (TryPerformFinisher()) return;
+                if (playerHealth != null && playerHealth.isBlocking) return;
+
+                // IMMEDIATE NORMAL ATTACK
+                lastAttackTime = Time.time;
+                comboStep++;
+                if (comboStep > 4)
+                {
+                    comboStep = 1;
+                }
+                PerformAttack(comboStep);
+            }
+            isCharging = false;
+            chargeTimer = 0f;
+        }
+    }
+    // NEW: Try to perform dash attack
+    private void TryPerformDashAttack()
+    {
+        // Check if player has a locked-on enemy
+        Transform lockedEnemy = playerMovement.GetLockedOnEnemy();
+
+        if (lockedEnemy == null)
+        {
+            Debug.Log("<color=yellow>Dash attack: No locked-on enemy!</color>");
+            return;
+        }
+
+        // Check if enemy is still alive
+        EnemyHealth enemyHealth = lockedEnemy.GetComponent<EnemyHealth>();
+        if (enemyHealth == null || enemyHealth.isDead)
+        {
+            Debug.Log("<color=yellow>Dash attack: Enemy is dead!</color>");
+            return;
+        }
+
+        // SUCCESS: Perform the dash attack
+        PerformDashAttack(lockedEnemy, enemyHealth);
+    }
+
+    // NEW: Execute the dash attack
+    private void PerformDashAttack(Transform targetEnemy, EnemyHealth targetEnemyHealth)
+    {
+        Debug.Log("<color=cyan>DASH ATTACK TRIGGERED!</color>");
+
+        lastDashAttackTime = Time.time;  // Set cooldown
+        isDashAttackActive = true;
+        isAttacking = true;
+        playerMovement.SetAttacking(true);
+
+        // 1. Spawn start effect at current position
+        if (dashAttackStartEffect != null && dashAttackStartEffectSpawnPoint != null)
+        {
+            ParticleSystem startEffect = Instantiate(
+                dashAttackStartEffect,
+                dashAttackStartEffectSpawnPoint.position,
+                dashAttackStartEffectSpawnPoint.rotation
+            );
+            startEffect.Play();
+        }
+
+        // 2. Calculate teleport position (above enemy)
+        float horizontalOffset = playerMovement.IsFacingRight() ? dashAttackTeleportOffsetY : -dashAttackTeleportOffsetY;
+        Vector3 teleportPosition = targetEnemy.position + new Vector3(horizontalOffset, 0, 0);
+
+        // 3. Teleport player
+        transform.position = teleportPosition;
+        playerMovement.StopDashAttack();
+        // 4. Spawn impact effect at teleport destination
+        if (dashAttackImpactEffect != null && dashAttackImpactEffectSpawnPoint != null)
+        {
+            ParticleSystem impactEffect = Instantiate(
+                dashAttackImpactEffect,
+                dashAttackImpactEffectSpawnPoint.position,
+                dashAttackImpactEffectSpawnPoint.rotation
+            );
+            impactEffect.Play();
+        }
+
+        animator.SetTrigger(dashAttackTriggerHash);
+
+        // 6. Delay the flip so animation plays without lock-on interference
+        StartCoroutine(DelayedFlipCoroutine(targetEnemy));
+
+        // 7. Start coroutine to deal damage and cleanup
+        StartCoroutine(DashAttackCoroutine(targetEnemyHealth));
+    }
+    private IEnumerator DelayedFlipCoroutine(Transform targetEnemy)
+    {
+        // Wait before flipping (let animation play)
+        yield return new WaitForSeconds(0.6f);  // Adjust this value (0.6s or 1s)
+
+        if (targetEnemy != null && playerMovement != null)
+        {
+            // NEW: Use the public method to force flip
+            playerMovement.ForceFlip(targetEnemy);
+            Debug.Log("<color=cyan>Delayed flip applied after dash attack!</color>");
+        }
+    }
+    // NEW: Coroutine to handle dash attack damage and cleanup
+    private IEnumerator DashAttackCoroutine(EnemyHealth targetEnemyHealth)
+    {
+        // NEW: Set flag to prevent flip glitch
+        playerMovement.SetDashAttackJustFinished(true);
+
+        // Wait for animation to reach damage frame
+        yield return new WaitForSeconds(0.3f);
+
+        // Deal damage
+        if (targetEnemyHealth != null && !targetEnemyHealth.isDead)
+        {
+            Debug.Log("<color=cyan>DASH ATTACK HIT! Dealing damage!</color>");
+            targetEnemyHealth.TakeDamage(dashAttackDamage, this);
+        }
+
+        // Wait for animation to finish
+        yield return new WaitForSeconds(0.5f);
+
+        // Cleanup
+        isDashAttackActive = false;
+        isAttacking = false;
+        playerMovement.SetAttacking(false);
+        comboStep = 0;
+
+        // NEW: Wait a bit more for rotation to settle, then allow flips again
+        yield return new WaitForSeconds(0.3f);
+        playerMovement.SetDashAttackJustFinished(false);
+
+        Debug.Log("<color=yellow>Dash attack finished - ready for next action!</color>");
+    }
+    private void PerformChargeAttack()
+    {
+        isAttacking = true;
+        playerMovement.SetAttacking(true);
+        animator.SetTrigger(chargeAttackTriggerHash);
+        comboStep = 0; // Reset combo
+        lastAttackTime = Time.time;
+
+        Debug.Log("<color=red>CHARGE ATTACK ANIMATION TRIGGERED!</color>");
+    }
+
+    // Call this from animation event when charge attack hits
+   public void DealChargeAttackDamage()
+{
+    Collider2D[] enemiesHit = Physics2D.OverlapBoxAll(attackDamagePoint.position, attackDamageAreaSize, 0f, enemyLayer);
+
+    foreach (Collider2D enemy in enemiesHit)
+    {
+        EnemyHealth enemyHealth = enemy.GetComponent<EnemyHealth>();
+        if (enemyHealth != null)
+        {
+            Debug.Log("<color=red>CHARGE ATTACK HIT!</color>");
+
+            // Deal damage
+            enemyHealth.TakeDamage(chargeAttackDamage, this);
+
+            // Play getParried animation
+            Animator enemyAnimator = enemyHealth.GetComponent<Animator>();
+            if (enemyAnimator != null)
+            {
+               
+                enemyAnimator.SetTrigger(Animator.StringToHash("getParried"));
+                Debug.Log("<color=cyan>Playing getParried animation!</color>");
             }
 
-            PerformAttack(comboStep);
+            // Stun the enemy
+            StartCoroutine(StunEnemyCoroutine(enemyHealth));
+
+            // Apply knockback
+            EnemyAI enemyAI = enemy.GetComponent<EnemyAI>();
+            if (enemyAI != null)
+            {
+                enemyAI.ApplyKnockback(transform, chargeKnockbackDistance, chargeKnockbackDuration);
+            }
         }
+    }
+}
+
+    private IEnumerator StunEnemyCoroutine(EnemyHealth enemyHealth)
+    {
+        // Play getParried animation
+        Animator enemyAnimator = enemyHealth.GetComponent<Animator>();
+        if (enemyAnimator != null)
+        {
+            enemyAnimator.SetTrigger(Animator.StringToHash("getParried"));
+        }
+
+        // Stun for specified duration
+        yield return new WaitForSeconds(chargeStunDuration);
     }
     public void StartClash(EnemyAI enemy)
     {
-        // Failsafe: Don't start a new clash if one is already happening.
-        if (isClashing) return;
+        // CLASH REMOVED - Just apply knockback instead
+        Debug.Log("<color=yellow>Heavy parry! Applying knockback to both.</color>");
 
-        // Stop any existing clash coroutine to be safe.
-        if (clashCoroutine != null)
+        if (playerMovement != null && enemy != null)
         {
-            StopCoroutine(clashCoroutine);
+            // Small knockback for both
+            playerMovement.ApplyKnockback(enemy.transform, 1.5f, 0.2f);
+            enemy.ApplyKnockback(transform, 1.5f, 0.2f);
         }
-        clashCoroutine = StartCoroutine(ClashSequence(enemy));
     }
 
     private IEnumerator ClashSequence(EnemyAI enemy)
@@ -494,30 +744,33 @@ public class AttackManager : MonoBehaviour
 
         animator.Play("Idle");
     }
-   
+
 
     private void PerformAttack(int step)
     {
+        // INSTANT STATE CHANGE
         isAttacking = true;
         playerMovement.SetAttacking(true);
 
         if (step == 1)
         {
             animator.SetTrigger(attack1TriggerHash);
-            Debug.Log("Attack 1");
         }
         else if (step == 2)
         {
             animator.SetTrigger(attack2TriggerHash);
-            Debug.Log("Attack 2");
         }
         else if (step == 3)
         {
             animator.SetTrigger(attack3TriggerHash);
-            Debug.Log("Attack 3");
         }
+        else if (step == 4)  
+        {
+            animator.SetTrigger(attack4TriggerHash);
+        }
+        Debug.Log($"<color=green>ATTACK {step} TRIGGERED IMMEDIATELY!</color>");
     }
-   
+
 
     public void PerformLunge()
     {
@@ -583,9 +836,31 @@ public class AttackManager : MonoBehaviour
             EnemyHealth enemyHealth = enemy.GetComponent<EnemyHealth>();
             if (enemyHealth != null)
             {
-              
+                // If this is attack 3 or 4, apply extra knockback
+                if (comboStep == 3)
+                {
+                    Debug.Log("<color=red>ATTACK 3 HIT! Applying heavy knockback to enemy!</color>");
+                    enemyHealth.TakeDamage(attackDamage, this);
 
-                enemyHealth.TakeDamage(attackDamage, this);
+                    
+                }
+                else if (comboStep == 4)  // NEW
+                {
+                    Debug.Log("<color=red>ATTACK 4 HIT! Applying MASSIVE knockback to enemy!</color>");
+                    enemyHealth.TakeDamage(attackDamage, this);
+
+                    // Apply knockback to enemy
+                    EnemyAI enemyAI = enemy.GetComponent<EnemyAI>();
+                    if (enemyAI != null)
+                    {
+                        enemyAI.ApplyKnockback(transform, attack3KnockbackDistance, attack3KnockbackDuration);
+                    }
+                }
+                else
+                {
+                    enemyHealth.TakeDamage(attackDamage, this);
+                }
+
                 hasDealtDamageThisAttack = true;
             }
         }
@@ -646,5 +921,42 @@ public class AttackManager : MonoBehaviour
             Gizmos.color = Color.cyan;
             Gizmos.DrawWireCube(attackDamagePoint.position, attackDamageAreaSize);
         }
+    }
+    public void PlaySlashSound1()
+    {
+        if (audioSource == null || slashSound1 == null)
+        {
+            Debug.LogWarning("AudioSource or Slash Sound 1 is not assigned!");
+            return;
+        }
+
+        audioSource.PlayOneShot(slashSound1);
+        Debug.Log("<color=cyan>Playing slash sound 1!</color>");
+    }
+
+    // NEW: Play slash sound 2
+    public void PlaySlashSound2()
+    {
+        if (audioSource == null || slashSound2 == null)
+        {
+            Debug.LogWarning("AudioSource or Slash Sound 2 is not assigned!");
+            return;
+        }
+
+        audioSource.PlayOneShot(slashSound2);
+        Debug.Log("<color=cyan>Playing slash sound 2!</color>");
+    }
+
+    // NEW: Play slash sound 3
+    public void PlaySlashSound3()
+    {
+        if (audioSource == null || slashSound3 == null)
+        {
+            Debug.LogWarning("AudioSource or Slash Sound 3 is not assigned!");
+            return;
+        }
+
+        audioSource.PlayOneShot(slashSound3);
+        Debug.Log("<color=cyan>Playing slash sound 3!</color>");
     }
 }

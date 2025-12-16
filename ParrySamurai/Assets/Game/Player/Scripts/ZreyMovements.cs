@@ -1,7 +1,8 @@
-// ZreyMovements.cs (FINAL - Works WITH Apply Root Motion)
+﻿// ZreyMovements.cs (FINAL - Works WITH Apply Root Motion)
 
-using UnityEngine;
+using FirstGearGames.Utilities.Objects;
 using System.Collections;
+using UnityEngine;
 
 public class ZreyMovements : MonoBehaviour
 {
@@ -74,6 +75,10 @@ public class ZreyMovements : MonoBehaviour
     private bool isBeingKnockedBack = false;
     [SerializeField] private AnimationCurve knockbackCurve;
     private AttackManager attackManager;
+    private bool dodgeInputConsumed = false;
+    private Transform lockedOnEnemy = null;
+    private bool isLockedOn = false;
+    private bool isDashAttackJustFinished = false;
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
@@ -124,10 +129,17 @@ public class ZreyMovements : MonoBehaviour
         }
         if (currentState == MovementState.Dashing)
         {
-            // MovePosition is the guaranteed way to move a Dynamic Rigidbody
-            // while respecting physics collisions.
+            if (isAttackLocked)
+            {
+                // Dash was interrupted, exit dash state
+                SwitchState(MovementState.CombatIdle);
+                rb.velocity = Vector2.zero;  // Clear velocity
+                Debug.Log("<color=red>Dash interrupted - velocity cleared!</color>");
+                return;
+            }
+
             rb.MovePosition(rb.position + dashDirection * dashSpeed * Time.fixedDeltaTime);
-            return; // Stop here to ensure nothing else interferes.
+            return;
         }
         if (!isCombatMode && !isAttackLocked)
         {
@@ -146,19 +158,35 @@ public class ZreyMovements : MonoBehaviour
             return;
         }
 
-        // Apply movement based on the current mode.
         if (isCombatMode)
         {
             if (canCombatMove)
             {
-                // In combat, move forward/backward based on input.
-                float moveDirection = isFacingRight ? horizontalInput : -horizontalInput;
-                float targetSpeed = moveDirection > 0 ? combatMoveSpeed : combatMoveSpeed * 0.8f; // Optional: move slightly slower backwards
-                rb.velocity = new Vector2(horizontalInput * targetSpeed, rb.velocity.y);
+                // Keys are ABSOLUTE directions:
+                // D = always move RIGHT
+                // A = always move LEFT
+
+                float moveSpeed = 0f;
+
+                if (horizontalInput > 0) // D pressed = move RIGHT
+                {
+                    moveSpeed = combatMoveSpeed;
+                }
+                else if (horizontalInput < 0) // A pressed = move LEFT
+                {
+                    moveSpeed = -combatMoveSpeed;
+                }
+
+                // Slower when moving backward (opposite to facing direction)
+                if ((isFacingRight && moveSpeed < 0) || (!isFacingRight && moveSpeed > 0))
+                {
+                    moveSpeed *= 0.8f; // Backward movement is slower
+                }
+
+                rb.velocity = new Vector2(moveSpeed, rb.velocity.y);
             }
             else
             {
-                // If the gate is closed, we are not moving.
                 rb.velocity = new Vector2(0, rb.velocity.y);
             }
         }
@@ -223,24 +251,99 @@ public class ZreyMovements : MonoBehaviour
     // --- CORE LOGIC ---
     private void HandleModeSwitch()
     {
-        if (Input.GetKeyDown(KeyCode.LeftShift))
+        if (Input.GetKeyDown(KeyCode.E))
         {
             isCombatMode = !isCombatMode;
             animator.SetBool(isCombatModeHash, isCombatMode);
 
-           
             if (!isCombatMode)
             {
-                rb.bodyType = RigidbodyType2D.Dynamic; // Ensure it's fully dynamic for walk mode
+                // NEW: Ensure rigidbody is fully dynamic when exiting combat
+                rb.isKinematic = false;
+                rb.bodyType = RigidbodyType2D.Dynamic;
+                rb.velocity = Vector2.zero;  // Clear any stuck velocity
+                isLockedOn = false;
+                lockedOnEnemy = null;
+                Debug.Log("<color=yellow>Lock-on disabled - exited combat mode</color>");
+            }
+            else
+            {
+                // NEW: When entering combat, keep rigidbody dynamic (not kinematic)
+                rb.isKinematic = false;
+                rb.bodyType = RigidbodyType2D.Dynamic;
+                FindAndLockNearestEnemy();
             }
 
             SwitchState(isCombatMode ? MovementState.CombatIdle : MovementState.Idle);
         }
     }
+    private void FindAndLockNearestEnemy()
+    {
+        EnemyAI[] allEnemies = FindObjectsOfType<EnemyAI>();
 
+        if (allEnemies.Length == 0)
+        {
+            Debug.LogWarning("No enemies found in scene!");
+            isLockedOn = false;
+            return;
+        }
+
+        EnemyAI closestEnemy = null;
+        float closestDistance = Mathf.Infinity;
+
+        foreach (EnemyAI enemy in allEnemies)
+        {
+            float distance = Vector3.Distance(transform.position, enemy.transform.position);
+            if (distance < closestDistance)
+            {
+                closestDistance = distance;
+                closestEnemy = enemy;
+            }
+        }
+
+        if (closestEnemy != null)
+        {
+            lockedOnEnemy = closestEnemy.transform;
+            isLockedOn = true;
+            Debug.Log($"<color=cyan>LOCKED ON TO: {closestEnemy.name}</color>");
+        }
+    }
+
+    // NEW: Update lock-on facing direction
+    private void UpdateLockOnFacing()
+    {
+        if (!isLockedOn || lockedOnEnemy == null)
+        {
+            return;
+        }
+
+        // Check if enemy is still alive
+        EnemyHealth enemyHealth = lockedOnEnemy.GetComponent<EnemyHealth>();
+        if (enemyHealth != null && enemyHealth.isDead)
+        {
+            // Enemy died, find new target
+            FindAndLockNearestEnemy();
+            return;
+        }
+
+        // Calculate direction to enemy
+        float directionToEnemy = lockedOnEnemy.position.x - transform.position.x;
+
+        // Face the enemy
+        if (directionToEnemy > 0 && !isFacingRight)
+        {
+            isFacingRight = true;
+            Debug.Log("<color=yellow>Lock-on: Flipped RIGHT</color>");
+        }
+        else if (directionToEnemy < 0 && isFacingRight)
+        {
+            isFacingRight = false;
+            Debug.Log("<color=yellow>Lock-on: Flipped LEFT</color>");
+        }
+    }
     private void FlipCharacter()
     {
-        // DON'T flip if attacking (check AttackManager), being knocked back, or dashing
+        // DON'T flip if attacking, being knocked back, or dashing
         if (isBeingKnockedBack || currentState == MovementState.Dashing)
         {
             return;
@@ -252,16 +355,40 @@ public class ZreyMovements : MonoBehaviour
             return;
         }
 
-        // This logic is now simple and runs every frame, making it foolproof.
-        if (!isCombatMode) // Only flip based on input in Walk Mode
+        // Don't flip if dash attack just finished
+        if (isDashAttackJustFinished)
+        {
+            return;
+        }
+
+        // NEW: If locked on, use lock-on facing system
+        if (isLockedOn && isCombatMode)
+        {
+            UpdateLockOnFacing();
+        }
+        // Walk mode: flip based on input
+        else if (!isCombatMode)
         {
             if (horizontalInput > 0 && !isFacingRight) isFacingRight = true;
             else if (horizontalInput < 0 && isFacingRight) isFacingRight = false;
         }
 
-        // Apply the rotation and scale based on the final 'isFacingRight' state.
-        transform.rotation = Quaternion.Euler(isFacingRight ? rightFacingRotation : leftFacingRotation);
-        transform.localScale = new Vector3(Mathf.Abs(transform.localScale.x), isFacingRight ? 1 : -1, transform.localScale.z);
+        // NEW: APPLY ROTATION AND SCALE TOGETHER IN ONE OPERATION
+        ApplyFlip();
+    }
+
+    // NEW: Separate method to apply flip - ensures rotation and scale are always together
+    private void ApplyFlip()
+    {
+        // Get the target rotation and scale based on facing direction
+        Vector3 targetRotation = isFacingRight ? rightFacingRotation : leftFacingRotation;
+        float targetScaleY = isFacingRight ? 1 : -1;
+
+        // APPLY BOTH AT THE SAME TIME
+        transform.rotation = Quaternion.Euler(targetRotation);
+        transform.localScale = new Vector3(Mathf.Abs(transform.localScale.x), targetScaleY, transform.localScale.z);
+
+        // Apply to particle effects
         if (breathEffect != null)
         {
             breathEffect.transform.localScale = new Vector3(isFacingRight ? 1 : -1, 1, 1);
@@ -269,6 +396,61 @@ public class ZreyMovements : MonoBehaviour
         if (SmokeEffect != null)
         {
             SmokeEffect.transform.localScale = new Vector3(isFacingRight ? 1 : -1, 1, 1);
+        }
+
+        Debug.Log($"<color=cyan>Flip applied: Facing {(isFacingRight ? "RIGHT" : "LEFT")} - Rotation: {targetRotation}, Scale Y: {targetScaleY}</color>");
+    }
+    public void ForceFlip(Transform target)
+    {
+        float directionToTarget = target.position.x - transform.position.x;
+
+        if (directionToTarget > 0)
+        {
+            isFacingRight = true;
+        }
+        else if (directionToTarget < 0)
+        {
+            isFacingRight = false;
+        }
+
+        // IMMEDIATELY apply the flip
+        ApplyFlip();
+
+        Debug.Log($"<color=cyan>Force flip applied - Facing {(isFacingRight ? "RIGHT" : "LEFT")}</color>");
+    }
+    private void HandleCombatFlip()
+    {
+        // If facing right, need to double-tap A to flip left
+        if (isFacingRight && Input.GetKeyDown(KeyCode.A))
+        {
+            float timeSinceLastTap = Time.time - lastTapTime_Left;
+            if (timeSinceLastTap < doubleTapTimeThreshold)
+            {
+                // Double-tap detected! Flip!
+                isFacingRight = false;
+                Debug.Log("<color=yellow>FLIPPED LEFT!</color>");
+                lastTapTime_Left = -1f; // Reset to prevent accidental flips
+            }
+            else
+            {
+                lastTapTime_Left = Time.time; // Record first tap
+            }
+        }
+        // If facing left, need to double-tap D to flip right
+        else if (!isFacingRight && Input.GetKeyDown(KeyCode.D))
+        {
+            float timeSinceLastTap = Time.time - lastTapTime_Right;
+            if (timeSinceLastTap < doubleTapTimeThreshold)
+            {
+                // Double-tap detected! Flip!
+                isFacingRight = true;
+                Debug.Log("<color=yellow>FLIPPED RIGHT!</color>");
+                lastTapTime_Right = -1f; // Reset to prevent accidental flips
+            }
+            else
+            {
+                lastTapTime_Right = Time.time; // Record first tap
+            }
         }
     }
     private void Jump()
@@ -290,42 +472,112 @@ public class ZreyMovements : MonoBehaviour
         rb.AddForce(new Vector2(0, jumpForce), ForceMode2D.Impulse);
         SwitchState(MovementState.Jumping);
 
-        // Wait a moment for the jump to be in the air.
-        yield return new WaitForSeconds(0.1f);
+        // NEW: Wait MUCH LONGER for the jump to complete naturally
+        // Don't switch back to kinematic until the jump is done
+        yield return new WaitForSeconds(0.5f);  // INCREASED from 0.1f
 
-        // After the jump, if we are supposed to be in combat mode, return to kinematic.
-        if (isCombatMode)
+        // NEW: Only switch back to kinematic if we're still in combat mode AND grounded
+        if (isCombatMode && isGrounded)
         {
             rb.isKinematic = true;
         }
     }
+    public void StopDashAttack()
+    {
+        // Exit dash state immediately
+        if (currentState == MovementState.Dashing)
+        {
+            SwitchState(MovementState.CombatIdle);
+        }
+
+        // NEW: Clear all velocity to prevent sliding
+        rb.velocity = Vector2.zero;
+
+        // NEW: Apply slight momentum (optional - remove if you want complete stop)
+        // Vector2 momentumDirection = isFacingRight ? Vector2.right : Vector2.left;
+        // rb.velocity = momentumDirection * 2f;  // Slight forward momentum
+
+        Debug.Log("<color=cyan>Dash attack stopped - velocity cleared!</color>");
+    }
+
+
 
     private void HandleDashInput()
     {
-        if (!isCombatMode || !isGrounded || currentState == MovementState.Dashing || isAttackLocked) return;
+        if (!isCombatMode || !isGrounded || currentState == MovementState.Dashing) return;
 
-        if ((isFacingRight && Input.GetKeyDown(KeyCode.D)) || (!isFacingRight && Input.GetKeyDown(KeyCode.A)))
+        if (Input.GetKeyDown(KeyCode.C))
         {
-            float lastTapTime = isFacingRight ? lastTapTime_Right : lastTapTime_Left;
-            if (Time.time - lastTapTime < doubleTapTimeThreshold)
+            PlayerHealth playerHealth = GetComponent<PlayerHealth>();
+            if (playerHealth != null && playerHealth.IsDodgeWindowActive() && !dodgeInputConsumed)
             {
-                dashDirection = isFacingRight ? Vector2.right : Vector2.left;
-                SwitchState(MovementState.Dashing, true);
+                PerformDodge(playerHealth.GetCurrentEnemyAttackType());
+                dodgeInputConsumed = true;  // LOCK: Only one dodge per window
+                return;
             }
-            if (isFacingRight) lastTapTime_Right = Time.time; else lastTapTime_Left = Time.time;
         }
-        else if ((isFacingRight && Input.GetKeyDown(KeyCode.A)) || (!isFacingRight && Input.GetKeyDown(KeyCode.D)))
+
+
+        if (Input.GetKeyDown(KeyCode.LeftShift))
         {
-            float lastTapTime = isFacingRight ? lastTapTime_Left : lastTapTime_Right;
-            if (Time.time - lastTapTime < doubleTapTimeThreshold)
+           
+            // Determine if dashing forward or backward based on facing direction
+            bool isDashingForward = (isFacingRight && horizontalInput >= 0) || (!isFacingRight && horizontalInput <= 0);
+
+            if (horizontalInput < 0 && isFacingRight) // A pressed while facing right = backward dash
             {
-                dashDirection = isFacingRight ? Vector2.left : Vector2.right;
-                SwitchState(MovementState.Dashing, false);
+                dashDirection = Vector2.left;
+                SwitchState(MovementState.Dashing, false); // Backward dash
+                Debug.Log("<color=cyan>BACKWARD DASH!</color>");
             }
-            if (isFacingRight) lastTapTime_Left = Time.time; else lastTapTime_Right = Time.time;
+            else if (horizontalInput > 0 && !isFacingRight) // D pressed while facing left = backward dash
+            {
+                dashDirection = Vector2.right;
+                SwitchState(MovementState.Dashing, false); // Backward dash
+                Debug.Log("<color=cyan>BACKWARD DASH!</color>");
+            }
+            else
+            {
+                // Forward dash (or no input = forward)
+                dashDirection = isFacingRight ? Vector2.right : Vector2.left;
+                SwitchState(MovementState.Dashing, true); // Forward dash
+                Debug.Log("<color=cyan>FORWARD DASH!</color>");
+            }
+            return;
+        }
+
+        // Double-tap A or D to FLIP (only in combat mode)
+        if (Input.GetKeyDown(KeyCode.A))
+        {
+            float timeSinceLastTap = Time.time - lastTapTime_Left;
+            if (timeSinceLastTap < doubleTapTimeThreshold && isFacingRight)
+            {
+                // Double-tap A while facing right = FLIP LEFT
+                isFacingRight = false;
+                Debug.Log("<color=yellow>FLIPPED LEFT!</color>");
+                lastTapTime_Left = -1f;
+            }
+            else
+            {
+                lastTapTime_Left = Time.time;
+            }
+        }
+        else if (Input.GetKeyDown(KeyCode.D))
+        {
+            float timeSinceLastTap = Time.time - lastTapTime_Right;
+            if (timeSinceLastTap < doubleTapTimeThreshold && !isFacingRight)
+            {
+                // Double-tap D while facing left = FLIP RIGHT
+                isFacingRight = true;
+                Debug.Log("<color=yellow>FLIPPED RIGHT!</color>");
+                lastTapTime_Right = -1f;
+            }
+            else
+            {
+                lastTapTime_Right = Time.time;
+            }
         }
     }
-
     private void UpdateState()
     {
         if (isAttackLocked) return;
@@ -346,9 +598,17 @@ public class ZreyMovements : MonoBehaviour
                 if (Input.GetKeyDown(KeyCode.Space) && isGrounded) Jump();
                 else if (horizontalInput != 0 && isGrounded)
                 {
-                    float moveDirection = isFacingRight ? horizontalInput : -horizontalInput;
-                    if (moveDirection > 0) SwitchState(MovementState.CombatMoveForward);
-                    else SwitchState(MovementState.CombatMoveBackward);
+                    // Determine if moving forward or backward based on facing direction
+                    bool isMovingForward = (isFacingRight && horizontalInput > 0) || (!isFacingRight && horizontalInput < 0);
+
+                    if (isMovingForward)
+                    {
+                        SwitchState(MovementState.CombatMoveForward);
+                    }
+                    else
+                    {
+                        SwitchState(MovementState.CombatMoveBackward);
+                    }
                 }
                 else if (!isGrounded && rb.velocity.y < -0.1f) SwitchState(MovementState.Falling);
                 break;
@@ -359,9 +619,17 @@ public class ZreyMovements : MonoBehaviour
                 else if (!isGrounded && rb.velocity.y < -0.1f) SwitchState(MovementState.Falling);
                 else
                 {
-                    float moveDirection = isFacingRight ? horizontalInput : -horizontalInput;
-                    if (moveDirection > 0 && currentState != MovementState.CombatMoveForward) SwitchState(MovementState.CombatMoveForward);
-                    else if (moveDirection < 0 && currentState != MovementState.CombatMoveBackward) SwitchState(MovementState.CombatMoveBackward);
+                    // Determine if moving forward or backward based on facing direction
+                    bool isMovingForward = (isFacingRight && horizontalInput > 0) || (!isFacingRight && horizontalInput < 0);
+
+                    if (isMovingForward && currentState != MovementState.CombatMoveForward)
+                    {
+                        SwitchState(MovementState.CombatMoveForward);
+                    }
+                    else if (!isMovingForward && currentState != MovementState.CombatMoveBackward)
+                    {
+                        SwitchState(MovementState.CombatMoveBackward);
+                    }
                 }
                 break;
             case MovementState.Jumping:
@@ -488,6 +756,7 @@ public class ZreyMovements : MonoBehaviour
         }
 
         transform.position = endPosition;
+        rb.velocity = Vector2.zero;
         isAttackLocked = false;
     }
 
@@ -519,6 +788,82 @@ public class ZreyMovements : MonoBehaviour
         // Apply the rotation immediately.
         transform.rotation = Quaternion.Euler(isFacingRight ? rightFacingRotation : leftFacingRotation);
     }
+
+    private void PerformDodge(string attackType)
+    {
+        Debug.Log($"<color=cyan>DODGE PERFORMED! Attack type: {attackType}</color>");
+
+        string dodgeAnimationName = "";
+
+        if (attackType == "lightAttack1") dodgeAnimationName = "dodge1";
+        else if (attackType == "lightAttack2") dodgeAnimationName = "dodge2";
+        else if (attackType == "lightAttack3") dodgeAnimationName = "dodge3";
+        else if (attackType == "attack1") dodgeAnimationName = "dodge1";
+        else if (attackType == "attack2") dodgeAnimationName = "dodge2";
+
+        Debug.Log($"<color=cyan>Dodge animation name: {dodgeAnimationName}</color>");
+
+        int dodgeHash = Animator.StringToHash(dodgeAnimationName);
+        Debug.Log($"<color=cyan>Dodge hash: {dodgeHash}</color>");
+
+        animator.SetTrigger(dodgeHash);
+        Debug.Log($"<color=cyan>Trigger set!</color>");
+
+        PlayerHealth playerHealth = GetComponent<PlayerHealth>();
+        if (playerHealth != null)
+        {
+            // REMOVED: SetDodgeActive(true) - now controlled by animation events
+            StartCoroutine(playerHealth.SlowMoEffect());
+        }
+
+        StartCoroutine(EndDodgeCoroutine());
+    }
+
+    private IEnumerator EndDodgeCoroutine()
+    {
+        yield return new WaitForSeconds(0.5f); // Adjust to dodge animation length
+
+        // REMOVED: SetDodgeActive(false) - now controlled by animation events
+        dodgeInputConsumed = false;
+        Debug.Log("<color=yellow>Dodge ended - ready for next dodge</color>");
+    }
+    public void ResetDodgeInput()
+    {
+        dodgeInputConsumed = false;
+        Debug.Log("<color=cyan>Dodge input reset - ready for next dodge!</color>");
+    }
+    public bool IsDashingForward()
+    {
+        if (currentState != MovementState.Dashing)
+            return false;
+
+        // Check if dash direction matches facing direction (forward dash)
+        bool isForwardDash = (isFacingRight && dashDirection == Vector2.right) ||
+                             (!isFacingRight && dashDirection == Vector2.left);
+        return isForwardDash;
+    }
+    public void SetDashAttackJustFinished(bool finished)
+    {
+        isDashAttackJustFinished = finished;
+        if (finished)
+        {
+            Debug.Log("<color=yellow>Dash attack flip lock ENABLED</color>");
+        }
+        else
+        {
+            Debug.Log("<color=yellow>Dash attack flip lock DISABLED</color>");
+        }
+    }
+    public Transform GetLockedOnEnemy()
+    {
+        if (isLockedOn && lockedOnEnemy != null)
+        {
+            return lockedOnEnemy;
+        }
+        return null;
+    }
+
+
     private void OnDrawGizmosSelected()
     {
         if (groundCheckPoint == null) return;

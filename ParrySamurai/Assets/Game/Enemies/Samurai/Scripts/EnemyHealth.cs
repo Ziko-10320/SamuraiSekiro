@@ -3,7 +3,7 @@
 using FirstGearGames.SmoothCameraShaker;
 using System.Collections;
 using UnityEngine;
-
+using UnityEngine.UI;
 public class EnemyHealth : MonoBehaviour
 {
     [Header("Health Settings")]
@@ -82,16 +82,234 @@ public class EnemyHealth : MonoBehaviour
     public bool isDead { get; private set; } = false;
     private bool isPerformingCounterAttack = false;
     private readonly int frontKickTriggerHash = Animator.StringToHash("frontKick");
+    [SerializeField] private ParticleSystem getParriedSparksEffect;
+    [Header("Posture System")]
+    [SerializeField] private float maxPosture = 100f;  // Max posture value
+    private float currentPosture = 0f;  // Current posture
+    [SerializeField] private float postureIncreaseOnParry = 25f;  // Increase when parried
+    [SerializeField] private float postureIncreaseOnEnemyParry = 15f;  // Increase when enemy parries
+    [SerializeField] private float postureDecayRate = 5f;  // Decay per second
+    [SerializeField] private float postureDecayDelay = 2f;  // Delay before decay starts
+    private float lastPostureChangeTime = 0f;  // Track when posture last changed
+    [Header("UI References")]
+    [SerializeField] private Slider healthBarSlider;
+    [SerializeField] private Text healthBarText;
+    [SerializeField] private Slider postureBarSliderLeft;   // NEW: Left half
+    [SerializeField] private Slider postureBarSliderRight;  // NEW: Right half
+    [SerializeField] private Text postureBarText;
+    [SerializeField] private Image postureFullIndicator;
+    [Header("Slider Animation Settings")]
+    [SerializeField] private float sliderAnimationSpeed = 5f;
+    private Coroutine healthSliderCoroutine;
+    private Coroutine postureSliderLeftCoroutine;   // NEW
+    private Coroutine postureSliderRightCoroutine;  // NEW
+    [Header("Sound Effects")]
+    [SerializeField] private AudioSource audioSource;  // Audio source for enemy sounds
+    [SerializeField] private AudioClip[] enemyParrySounds = new AudioClip[2];  // 2 enemy parry sounds
+    [SerializeField] private AudioClip[] enemyHitSounds = new AudioClip[3];  // Sound when enemy takes damage
+    [SerializeField] private AudioClip finisherSound;
     void Awake()
     {
         currentHealth = maxHealth;
+        currentPosture = 0f;
         animator = GetComponent<Animator>();
-        followScript = GetComponent<EnemyFollow>(); // Get the follow script
+        followScript = GetComponent<EnemyFollow>();
         rb = GetComponent<Rigidbody2D>();
-         enemyAI = GetComponent<EnemyAI>();
+        enemyAI = GetComponent<EnemyAI>();
+
         if (finisherPromptUI != null)
         {
             finisherPromptUI.SetActive(false);
+        }
+
+        if (healthBarSlider != null)
+        {
+            healthBarSlider.minValue = 0;
+            healthBarSlider.maxValue = 1;
+            healthBarSlider.value = 1;
+        }
+
+        // NEW: Initialize both posture sliders
+        if (postureBarSliderLeft != null)
+        {
+            postureBarSliderLeft.minValue = 0;
+            postureBarSliderLeft.maxValue = 1;
+            postureBarSliderLeft.value = 0;
+        }
+
+        if (postureBarSliderRight != null)
+        {
+            postureBarSliderRight.minValue = 0;
+            postureBarSliderRight.maxValue = 1;
+            postureBarSliderRight.value = 0;
+        }
+
+        UpdateBars();
+    }
+    private void UpdateBars()
+    {
+        // Update health bar with animation
+        if (healthBarSlider != null)
+        {
+            float healthPercent = (float)currentHealth / maxHealth;
+
+            if (healthSliderCoroutine != null)
+            {
+                StopCoroutine(healthSliderCoroutine);
+            }
+
+            healthSliderCoroutine = StartCoroutine(AnimateSlider(healthBarSlider, healthPercent));
+        }
+
+        if (healthBarText != null)
+        {
+            healthBarText.text = $"{currentHealth}/{maxHealth}";
+        }
+
+        // NEW: Update posture bars (both halves)
+        if (postureBarSliderLeft != null || postureBarSliderRight != null)
+        {
+            float posturePercent = currentPosture / maxPosture;
+
+            // Stop previous animations
+            if (postureSliderLeftCoroutine != null)
+            {
+                StopCoroutine(postureSliderLeftCoroutine);
+            }
+            if (postureSliderRightCoroutine != null)
+            {
+                StopCoroutine(postureSliderRightCoroutine);
+            }
+
+            // Animate both halves simultaneously
+            if (postureBarSliderLeft != null)
+            {
+                postureSliderLeftCoroutine = StartCoroutine(AnimateSlider(postureBarSliderLeft, posturePercent));
+            }
+            if (postureBarSliderRight != null)
+            {
+                postureSliderRightCoroutine = StartCoroutine(AnimateSlider(postureBarSliderRight, posturePercent));
+            }
+        }
+
+        if (postureBarText != null)
+        {
+            postureBarText.text = $"{Mathf.RoundToInt(currentPosture)}/{Mathf.RoundToInt(maxPosture)}";
+        }
+    }
+    // NEW: Disable all UI bars when entering finishable state
+    private void DisableUIBars()
+    {
+        if (healthBarSlider != null)
+        {
+            healthBarSlider.gameObject.SetActive(false);
+        }
+
+        if (postureBarSliderLeft != null)
+        {
+            postureBarSliderLeft.gameObject.SetActive(false);
+        }
+
+        if (postureBarSliderRight != null)
+        {
+            postureBarSliderRight.gameObject.SetActive(false);
+        }
+
+        if (healthBarText != null)
+        {
+            healthBarText.gameObject.SetActive(false);
+        }
+
+        if (postureBarText != null)
+        {
+            postureBarText.gameObject.SetActive(false);
+        }
+
+        if (postureFullIndicator != null)
+        {
+            postureFullIndicator.gameObject.SetActive(false);
+        }
+
+        Debug.Log("<color=yellow>All UI bars DISABLED!</color>");
+    }
+    // NEW: Smooth slider animation
+    private IEnumerator AnimateSlider(Slider slider, float targetValue)
+    {
+        float startValue = slider.value;
+        float elapsedTime = 0f;
+        float duration = 1f / sliderAnimationSpeed;  // Duration based on speed
+
+        while (elapsedTime < duration)
+        {
+            elapsedTime += Time.deltaTime;
+            float progress = elapsedTime / duration;
+
+            // Use smooth easing (ease-out)
+            progress = 1f - Mathf.Pow(1f - progress, 3f);
+
+            slider.value = Mathf.Lerp(startValue, targetValue, progress);
+            yield return null;
+        }
+
+        // Ensure final value is exact
+        slider.value = targetValue;
+    }
+    void Update()
+    {
+        // NEW: Decay posture over time
+        DecayPosture();
+    }
+    // NEW: Increase posture
+    private void IncreasePosture(float amount)
+    {
+        currentPosture += amount;
+        currentPosture = Mathf.Clamp(currentPosture, 0, maxPosture);
+        lastPostureChangeTime = Time.time;
+
+        Debug.Log($"<color=orange>Posture increased by {amount}! Current: {currentPosture}/{maxPosture}</color>");
+
+        UpdateBars();
+
+        if (currentPosture >= maxPosture)
+        {
+            Debug.Log("<color=red>POSTURE FULL! Enemy is now finishable!</color>");
+            ShowPostureFullIndicator();  // NEW: Show the indicator
+        }
+    }
+    private void ShowPostureFullIndicator()
+    {
+        if (postureFullIndicator != null)
+        {
+            postureFullIndicator.gameObject.SetActive(true);
+            Debug.Log("<color=yellow>Posture Full Indicator ENABLED!</color>");
+        }
+    }
+
+    // NEW: Hide posture full indicator (optional - for when posture decays)
+    private void HidePostureFullIndicator()
+    {
+        if (postureFullIndicator != null)
+        {
+            postureFullIndicator.gameObject.SetActive(false);
+            Debug.Log("<color=grey>Posture Full Indicator DISABLED!</color>");
+        }
+    }
+    // NEW: Decay posture over time
+    private void DecayPosture()
+    {
+        if (currentPosture <= 0) return;
+
+        if (Time.time - lastPostureChangeTime > postureDecayDelay)
+        {
+            currentPosture -= postureDecayRate * Time.deltaTime;
+            currentPosture = Mathf.Max(0, currentPosture);
+            UpdateBars();
+
+            // NEW: Hide indicator if posture drops below max
+            if (currentPosture < maxPosture)
+            {
+                HidePostureFullIndicator();
+            }
         }
     }
     public void ActivateComboArmor()
@@ -118,37 +336,6 @@ public class EnemyHealth : MonoBehaviour
     }
     public void TakeDamage(int damageAmount, AttackManager playerAttackManager = null)
     {
-        if (isInCombo)
-        {
-            // 2. Check if it has already taken its one allowed hit for this combo.
-            if (hasTakenDamageThisCombo)
-            {
-                Debug.Log("<color=grey>Enemy is in combo and has already taken damage. Ignoring hit.</color>");
-                return; // Do nothing. The enemy is invincible for the rest of the combo.
-            }
-            else
-            {
-                // This is the FIRST hit during the combo.
-                Debug.Log("<color=orange>Enemy took its one allowed hit during the combo.</color>");
-                currentHealth -= damageAmount;
-                hasTakenDamageThisCombo = true; // Flip the switch. No more damage allowed.
-
-                // We do NOT play the "take damage" animation because it would interrupt the combo.
-                // We just play the blood effect.
-                if (bloodEffect != null && bloodEffectSpawnPoint != null)
-                {
-                    ParticleSystem newBloodEffect = Instantiate(bloodEffect, bloodEffectSpawnPoint.position, Quaternion.identity);
-                    newBloodEffect.Play();
-                }
-
-                // Check for death, but don't play animations.
-                if (currentHealth <= 0) Die();
-
-                // IMPORTANT: We stop here. We do not want any other logic (like knockback) to run.
-                return;
-            }
-        }
-        // --- PARRY LOGIC (This only runs if we are NOT stunned) ---
         if (!isStunned)
         {
             // Ask the AI to make a parry decision.
@@ -161,34 +348,50 @@ public class EnemyHealth : MonoBehaviour
             if (isParrying)
             {
                 Debug.Log("<color=cyan>PARRY SUCCESS!</color>");
+                PlayRandomSound(enemyParrySounds);
+
+                if (currentPosture >= maxPosture)
+                {
+                    Debug.Log("<color=red>POSTURE FULL! Entering finishable state!</color>");
+                    EnterFinishableState();
+                    return;
+                }
+                IncreasePosture(postureIncreaseOnEnemyParry);
                 if (enemyAI != null) { enemyAI.OnSuccessfulParry(); }
-                // ... (All your parry success logic is perfect) ...
                 CameraShakerHandler.Shake(CameraShakeParry);
                 if (parrySparksEffect != null) { Instantiate(parrySparksEffect, parrySparksSpawnPoint.position, Quaternion.identity); }
-                
+                EnemyFollow followScript = GetComponent<EnemyFollow>();
+                if (followScript != null)
+                {
+                    followScript.CancelLunge();
+                }
                 ZreyMovements playerMovement = FindObjectOfType<ZreyMovements>();
-                if (playerMovement != null) 
+                if (playerMovement != null)
                 {
                     playerMovement.GetParried(this.transform);
                     if (enemyAI != null)
                     {
+                        // KNOCKBACK DIRECTION: AWAY from player (not toward)
+                        Vector2 knockbackDirection = (transform.position - playerMovement.transform.position).normalized;
                         enemyAI.ApplyKnockback(playerMovement.transform, parryKnockbackForce, parryKnockbackDuration);
                     }
                 }
-
+               
                 // If we parry, we stop everything. Do not take damage.
                 return;
             }
         }
-
-        // --- THIS IS THE GUARANTEED FIX ---
-        // If the code reaches here, it means one of two things:
-        // 1. The enemy was stunned.
-        // 2. The enemy was not stunned, but it failed its parry attempt.
-        // In BOTH cases, the enemy MUST take damage.
-
+     
         Debug.Log("<color=red>DAMAGE PHASE: Enemy is taking damage.</color>");
         currentHealth -= damageAmount;
+        UpdateBars();
+        PlayRandomSound(enemyHitSounds);
+        if (currentPosture >= maxPosture)
+        {
+            Debug.Log("<color=red>POSTURE FULL! Entering finishable state!</color>");
+            EnterFinishableState();
+            return;
+        }
 
         // Play blood effect.
         if (bloodEffect != null && bloodEffectSpawnPoint != null)
@@ -217,6 +420,34 @@ public class EnemyHealth : MonoBehaviour
             
         }
         // --- END OF FIX ---
+    }
+    private void EnterFinishableState()
+    {
+        if (isFinishable) return;  // Already finishable
+
+        Debug.Log("<color=orange>Enemy posture full! Entering FINISHABLE state.</color>");
+        isFinishable = true;
+
+        // --- LOCK DOWN THE ENEMY COMPLETELY ---
+        if (GetComponent<EnemyAI>() != null) GetComponent<EnemyAI>().enabled = false;
+        if (GetComponent<EnemyFollow>() != null) GetComponent<EnemyFollow>().enabled = false;
+        if (GetComponent<EnemyAttack>() != null) GetComponent<EnemyAttack>().enabled = false;
+
+        rb.velocity = Vector2.zero;
+        rb.isKinematic = true;
+
+        animator.SetTrigger(enterFinishableStateTriggerHash);
+        animator.applyRootMotion = false;
+
+        gameObject.layer = LayerMask.NameToLayer("Finishable");
+
+        if (finisherPromptUI != null)
+        {
+            finisherPromptUI.SetActive(true);
+        }
+
+        Debug.Log("<color=red>ENEMY IS NOW FINISHABLE - ALL BEHAVIOR LOCKED!</color>");
+        DisableUIBars();
     }
     public bool IsInUninterruptibleCombo()
     {
@@ -252,17 +483,19 @@ public class EnemyHealth : MonoBehaviour
     {
         if (parryingPlayer == null) return;
 
+        // NEW: Increase posture when parried
+        IncreasePosture(postureIncreaseOnParry);
+
         // ONLY stun if this was a counter-attack
         if (isPerformingCounterAttack)
         {
             Debug.Log("<color=red>Counter-attack was parried! Applying stun.</color>");
             StartCoroutine(StunCoroutine(parryingPlayer));
-            isPerformingCounterAttack = false; // Reset flag
+            isPerformingCounterAttack = false;
         }
         else
         {
             Debug.Log("<color=yellow>Regular attack was parried, but no stun (not a counter)</color>");
-            // No stun, just reset the flag
             isParrying = false;
         }
     }
@@ -355,37 +588,16 @@ public class EnemyHealth : MonoBehaviour
 
         Debug.Log($"<color=red>{gameObject.name} has been slain!</color>");
         isDead = true;
-        // This check is still good. It prevents the method from running multiple times.
+
         if (isFinishable)
         {
             return;
         }
 
-        Debug.Log("<color=orange>Enemy health at 0. Entering FINISHABLE state.</color>");
-        isFinishable = true; // The C# bool is still needed for the logic, but not for the Animator.
-
-        // --- THIS IS THE GUARANTEED FIX ---
-        // We are now using a Trigger. It fires once and cannot get stuck in a loop.
-        animator.SetTrigger(enterFinishableStateTriggerHash);
-        // --- END OF FIX ---
-
-        // The rest of the lockdown code is correct.
-        if (GetComponent<EnemyAI>() != null) GetComponent<EnemyAI>().enabled = false;
-        if (GetComponent<EnemyFollow>() != null) GetComponent<EnemyFollow>().enabled = false;
-        if (GetComponent<EnemyAttack>() != null) GetComponent<EnemyAttack>().enabled = false;
-
-        animator.applyRootMotion = false;
-        rb.isKinematic = true;
-        rb.velocity = Vector2.zero;
-
-        gameObject.layer = LayerMask.NameToLayer("Finishable");
-
-        if (finisherPromptUI != null)
-        {
-            finisherPromptUI.SetActive(true);
-        }
+        // If health reaches 0 but posture isn't full, still enter finishable
+        EnterFinishableState();
     }
-   
+
     public void CameraShake()
     {
         CameraShakerHandler.Shake(CameraShakeParry);
@@ -488,5 +700,54 @@ public class EnemyHealth : MonoBehaviour
         Debug.Log("<color=red>Enemy has been executed. Destroying GameObject.</color>");
         // You can add loot drops or XP gain here before destroying.
         Destroy(gameObject,3);
+    }
+
+    public void PlayParrySparks()
+    {
+        if (getParriedSparksEffect != null && parrySparksSpawnPoint != null)
+        {
+            Instantiate(getParriedSparksEffect, parrySparksSpawnPoint.position, Quaternion.identity);
+            Debug.Log("<color=cyan>Parry sparks played!</color>");
+        }
+    }
+    private void PlayRandomSound(AudioClip[] soundArray)
+    {
+        if (audioSource == null || soundArray == null || soundArray.Length == 0)
+        {
+            return;
+        }
+
+        int randomIndex = Random.Range(0, soundArray.Length);
+        AudioClip selectedSound = soundArray[randomIndex];
+
+        if (selectedSound != null)
+        {
+            audioSource.PlayOneShot(selectedSound);
+            Debug.Log($"<color=cyan>Enemy playing sound: {selectedSound.name}</color>");
+        }
+    }
+
+    // NEW: Play a single sound
+    private void PlaySound(AudioClip sound)
+    {
+        if (audioSource == null || sound == null)
+        {
+            return;
+        }
+
+        audioSource.PlayOneShot(sound);
+        Debug.Log($"<color=cyan>Enemy playing sound: {sound.name}</color>");
+    }
+    // NEW: Play finisher sound
+    public void PlayFinisherSound()
+    {
+        if (audioSource == null || finisherSound == null)
+        {
+            Debug.LogWarning("AudioSource or Finisher Sound is not assigned!");
+            return;
+        }
+
+        audioSource.PlayOneShot(finisherSound);
+        Debug.Log("<color=orange>Playing finisher sound!</color>");
     }
 }
